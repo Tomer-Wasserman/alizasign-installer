@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Portal – Free Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700&family=Rubik:wght@400;500;700&family=Assistant:wght@400;600;700&family=Noto+Sans+Hebrew:wght@400;600&family=Secular+One&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#1f1e1b; --panel:#2a2723; --panel2:#322e29; --line:#403b34;
+    --txt:#ece7df; --muted:#9a9389; --accent:#d97757; --user:#3a4a5a; --green:#7fb069;
+    --user-color:#ece7df; --claude-color:#ece7df;
+    --font:"Segoe UI","Assistant",Arial,sans-serif; --fontsize:15px; --bg-image:none;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:var(--font); background:var(--bg); color:var(--txt); height:100vh; overflow:hidden; }
+  .app { display:flex; direction:ltr; height:100vh; }
+  .main { flex:1; min-width:0; direction:rtl; display:flex; flex-direction:column; height:100vh; position:relative;
+    background:var(--bg-image); background-size:cover; background-position:center; }
+  /* sidebar (left) */
+  #sidebar { width:230px; flex:none; direction:rtl; background:var(--panel); border-inline-end:1px solid var(--line);
+    display:flex; flex-direction:column; padding:12px 10px; gap:8px; }
+  .brand { color:var(--accent); font-weight:700; font-size:15px; line-height:1.2; padding:2px 4px 8px; }
+  .brand span { color:var(--muted); font-size:11px; font-weight:400; }
+  .side-btn { background:var(--panel2); color:var(--txt); border:1px solid var(--line); border-radius:9px; padding:9px 10px; font-size:13px; cursor:pointer; text-align:right; }
+  .side-btn:hover { border-color:var(--accent); }
+  .side-btn.primary { background:var(--accent); color:#fff; border:none; font-weight:600; }
+  .conv-head { font-size:11px; color:var(--muted); margin:8px 4px 2px; font-weight:600; display:flex; justify-content:space-between; align-items:center; }
+  .follow-lbl { font-weight:400; font-size:10px; display:flex; align-items:center; gap:3px; cursor:pointer; }
+  .conv-list { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:3px; }
+  .conv-item { flex:none; padding:8px 10px; border-radius:8px; font-size:13px; line-height:1.45; color:var(--txt); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border:1px solid transparent; unicode-bidi:plaintext; }
+  .conv-item:hover { background:var(--panel2); }
+  .conv-item.active { background:var(--panel2); border-color:var(--accent); }
+  .conv-item .ci-dot { color:var(--green); margin-inline-end:4px; }
+  .side-foot { border-top:1px solid var(--line); padding-top:8px; display:flex; flex-direction:column; gap:6px; }
+  .model-disp { font-size:12px; color:var(--muted); padding:2px 4px; }
+  .model-disp b { color:var(--accent); }
+  .stopbtn { display:none; background:transparent; color:var(--accent); border:1px solid var(--accent); border-radius:8px; font-size:12px; padding:3px 10px; cursor:pointer; }
+  .stopbtn.show { display:inline-block; }
+  /* resizable sidebar */
+  .side-resize { width:5px; flex:none; cursor:col-resize; background:transparent; transition:background .15s; }
+  .side-resize:hover { background:var(--accent); }
+  /* settings panel - modern */
+  .settings-panel { position:fixed; inset:0; background:rgba(0,0,0,.62); backdrop-filter:blur(3px); z-index:120; display:flex; align-items:center; justify-content:center; }
+  .settings-inner { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:22px 22px 18px; width:420px; max-width:94vw; max-height:88vh; overflow-y:auto; direction:rtl; box-shadow:0 12px 40px rgba(0,0,0,.5); }
+  .settings-inner h3 { margin:0 0 16px; color:var(--accent); font-size:17px; font-weight:700; }
+  .set-section { margin-bottom:18px; }
+  .set-label { font-size:12px; color:var(--muted); font-weight:600; margin-bottom:8px; letter-spacing:.3px; }
+  .set-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; color:var(--txt); }
+  .range-row { margin-top:10px; }
+  .range-row input[type=range] { flex:1; accent-color:var(--accent); }
+  .fs-val { color:var(--accent); font-weight:600; min-width:34px; text-align:center; }
+  .mini { display:inline-flex; align-items:center; gap:7px; background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:6px 10px; }
+  .mini-btn { background:var(--panel2); color:var(--txt); border:1px solid var(--line); border-radius:9px; padding:7px 12px; font-size:12px; cursor:pointer; }
+  .mini-btn:hover { border-color:var(--accent); }
+  input[type=color] { width:34px; height:24px; border:1px solid var(--line); border-radius:6px; background:none; cursor:pointer; padding:0; }
+  .swatches { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; }
+  .swatch { height:38px; border-radius:9px; border:2px solid var(--line); cursor:pointer; position:relative; }
+  .swatch.active { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent); }
+  .font-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .font-card { background:var(--panel2); border:2px solid var(--line); border-radius:10px; padding:9px 11px; cursor:pointer; text-align:right; }
+  .font-card.active { border-color:var(--accent); }
+  .font-card .fc-name { font-size:11px; color:var(--muted); }
+  .font-card .fc-prev { font-size:16px; color:var(--txt); margin-top:2px; }
+  .reset-btn { width:100%; margin-top:6px; background:transparent; color:var(--muted); border:1px solid var(--line); border-radius:10px; padding:9px; font-size:12px; cursor:pointer; }
+  .reset-btn:hover { color:var(--accent); border-color:var(--accent); }
+  #settingsClose { position:absolute; top:14px; inset-inline-start:16px; background:transparent; border:none; color:var(--muted); font-size:17px; cursor:pointer; }
+  header { display:flex; align-items:center; gap:12px; padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; color:var(--accent); font-weight:600; white-space:nowrap; }
+  select { background:var(--panel2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:13px; max-width:48vw; }
+  .dot { width:9px; height:9px; border-radius:50%; background:#666; display:inline-block; }
+  .dot.live { background:var(--green); box-shadow:0 0 6px var(--green); }
+  .status { font-size:12px; color:var(--muted); margin-inline-start:auto; display:flex; align-items:center; gap:6px; }
+  .spin { display:none; }
+  .spin.on { display:inline-block; width:15px; height:15px; border:2px solid var(--line);
+    border-top-color:var(--accent); border-right-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .spinner { width:13px; height:13px; border:2px solid rgba(217,119,87,.3);
+    border-top-color:var(--accent); border-radius:50%; display:inline-block; animation:spin .7s linear infinite; }
+  .ready { display:flex; align-items:center; gap:6px; font-weight:600; }
+  .ready .rdot { width:9px; height:9px; border-radius:50%; display:inline-block; }
+  .ready.idle { color:var(--green); }
+  .ready.idle .rdot { background:var(--green); box-shadow:0 0 6px var(--green); }
+  .ready.busy { color:var(--accent); }
+  #log { flex:1; overflow-y:auto; padding:20px 16px 60px; }
+  .wrap { max-width:860px; margin:0 auto; }
+  .msg { margin:10px 0; padding:12px 15px; border-radius:12px; line-height:1.7; font-size:var(--fontsize); word-wrap:break-word; }
+  .msg.user { background:var(--user); border:1px solid #46596b; color:var(--user-color); }
+  .msg.assistant { background:var(--panel); border:1px solid var(--line); color:var(--claude-color); }
+  .body { display:flex; flex-direction:column; gap:8px; }
+  .seg { unicode-bidi:isolate; }
+  .seg p, .seg li, .seg blockquote, .seg .md-h { unicode-bidi:isolate; }
+  .seg p { margin:0 0 8px; } .seg p:last-child { margin-bottom:0; }
+  .seg .md-h { margin:10px 0 6px; font-weight:700; line-height:1.3; }
+  h2.md-h { font-size:19px; } h3.md-h { font-size:17px; } h4.md-h { font-size:15px; } h5.md-h,h6.md-h { font-size:14px; }
+  .md-list { margin:6px 0; padding-inline-start:22px; } .md-list li { margin:3px 0; }
+  .md-bq { border-inline-start:3px solid var(--accent); padding-inline-start:10px; color:var(--muted); margin:6px 0; }
+  .seg a { color:var(--accent); }
+  .seg em { font-style:italic; }
+  .seg.think { white-space:pre-wrap; color:var(--muted); font-style:italic; font-size:14px; border-inline-start:2px solid var(--line); padding-inline-start:10px; opacity:.92; }
+  .seg.tooluse { color:var(--accent); font-size:13px; font-family:"Cascadia Code","Consolas",monospace; opacity:.9; }
+  .att-img { max-height:96px; max-width:130px; border-radius:8px; border:1px solid var(--line); cursor:pointer; align-self:flex-start; object-fit:cover; }
+  .att-row { display:flex; flex-wrap:wrap; gap:8px; }
+  .att-file { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--txt); background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:6px 10px; align-self:flex-start; }
+  .role { font-size:11px; color:var(--muted); margin-bottom:6px; font-weight:600; letter-spacing:.3px; }
+  pre { background:#15140f; border:1px solid var(--line); border-radius:8px; padding:10px 12px; overflow-x:auto; direction:ltr; text-align:left; }
+  .codewrap { border:1px solid var(--line); border-radius:8px; overflow:hidden; direction:ltr; margin:2px 0; }
+  .codebar { display:flex; justify-content:space-between; align-items:center; background:#15140f; border-bottom:1px solid var(--line); padding:3px 6px 3px 10px; }
+  .codelang { font-size:11px; color:var(--muted); font-family:"Cascadia Code","Consolas",monospace; }
+  .codecopy { background:transparent; border:1px solid var(--line); color:var(--muted); border-radius:5px; font-size:11px; padding:1px 9px; cursor:pointer; }
+  .codecopy:hover { color:var(--txt); border-color:var(--accent); }
+  .codewrap pre { border:none; border-radius:0; margin:0; }
+  code { font-family:"Cascadia Code","Consolas",monospace; font-size:13px; }
+  p code, li code { background:#15140f; padding:1px 5px; border-radius:4px; }
+  .empty { text-align:center; color:var(--muted); margin-top:80px; }
+  /* first-run terms & consent gate */
+  .terms-gate { position:fixed; inset:0; z-index:300; background:rgba(10,9,8,.93); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; direction:rtl; }
+  .terms-card { background:var(--panel); border:1px solid var(--accent); border-radius:14px; max-width:560px; width:92%; max-height:88vh; display:flex; flex-direction:column; box-shadow:0 16px 50px rgba(0,0,0,.6); }
+  .terms-card h2 { margin:0; padding:16px 20px; color:var(--accent); font-size:17px; border-bottom:1px solid var(--line); }
+  .terms-body { padding:14px 20px; overflow-y:auto; font-size:13px; line-height:1.7; color:var(--txt); }
+  .terms-body b { color:var(--accent); }
+  .terms-body ul { padding-inline-start:20px; margin:8px 0; } .terms-body li { margin:4px 0; }
+  .terms-foot { padding:14px 20px; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:10px; }
+  .terms-chk { display:flex; gap:8px; align-items:flex-start; font-size:13px; cursor:pointer; line-height:1.5; }
+  .terms-accept { background:var(--accent); color:#fff; border:none; border-radius:9px; padding:10px; font-size:14px; font-weight:600; cursor:pointer; }
+  .terms-accept:disabled { opacity:.5; cursor:default; }
+  .terms-decline { background:transparent; color:var(--muted); border:none; font-size:12px; cursor:pointer; text-decoration:underline; }
+  /* approval-dialog mirror (folder access / permissions / any Allow-Deny prompt) */
+  .prompt-banner { position:absolute; top:52px; left:50%; transform:translateX(-50%); z-index:60; direction:rtl;
+    background:var(--panel2); border:1px solid var(--accent); border-radius:13px; padding:12px 16px;
+    max-width:min(640px,86%); box-shadow:0 8px 30px rgba(0,0,0,.55); display:none; }
+  .prompt-banner.show { display:block; }
+  .pb-title { font-size:11px; color:var(--accent); font-weight:700; letter-spacing:.4px; margin-bottom:5px; }
+  .pb-text { font-size:13px; color:var(--txt); margin-bottom:10px; unicode-bidi:plaintext; line-height:1.5; word-break:break-word; }
+  .pb-btns { display:flex; gap:8px; flex-wrap:wrap; }
+  .pb-btn { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:6px 16px; font-size:13px; font-weight:600; cursor:pointer; }
+  .pb-btn.secondary { background:transparent; color:var(--txt); border:1px solid var(--line); font-weight:400; }
+  .pb-btn:hover { filter:brightness(1.1); }
+  /* interactive AskUserQuestion blocks */
+  .aq-block { border:1px solid var(--accent); border-radius:10px; padding:10px 12px; margin:4px 0; background:rgba(217,119,87,.06); }
+  .aq-q { font-weight:600; margin-bottom:8px; }
+  .aq-opts { display:flex; flex-wrap:wrap; gap:8px; }
+  .aq-btn { background:var(--panel2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 13px; font-size:13px; cursor:pointer; text-align:right; max-width:100%; }
+  .aq-btn:hover { border-color:var(--accent); }
+  .aq-btn.sent { border-color:var(--green); color:var(--green); }
+  .aq-btn.sent::after { content:" ✓"; }
+  .aq-btn.fail { border-color:#c0504d; }
+  .aq-btn:disabled { opacity:.6; cursor:default; }
+  .aq-block.answered { opacity:.7; }
+  .aq-block.answered .aq-opts { pointer-events:none; }
+  .aq-desc { font-size:11px; color:var(--muted); display:block; margin-top:2px; font-weight:400; }
+  .aq-other { display:flex; gap:6px; margin-top:8px; }
+  .aq-other-in { flex:1; background:var(--panel2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:13px; font-family:inherit; direction:rtl; }
+  .aq-other-in:focus { outline:none; border-color:var(--accent); }
+  .aq-other-btn { background:transparent; color:var(--accent); border:1px solid var(--accent); border-radius:8px; padding:6px 12px; font-size:12px; cursor:pointer; }
+  .aq-other-btn:disabled { opacity:.5; }
+  /* task-list (progress) mirror */
+  .tasksbar { max-width:860px; margin:0 auto 6px; display:none; flex-wrap:wrap; gap:4px 16px; font-size:12px; color:var(--muted); direction:rtl; }
+  .tasksbar.show { display:flex; }
+  .task-head { color:var(--accent); font-weight:600; }
+  .task-item { display:inline-flex; gap:5px; align-items:center; unicode-bidi:plaintext; }
+  .task-item.done { color:var(--green); }
+  .task-item.doing { color:var(--accent); }
+  /* working-folders mirror (sidebar) */
+  .folder-list { display:flex; flex-direction:column; gap:4px; }
+  .folder-chip { font-size:11px; color:var(--muted); background:var(--panel2); border:1px solid var(--line); border-radius:7px;
+    padding:4px 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:ltr; text-align:left; }
+  .scrollbtn { position:absolute; left:50%; transform:translateX(-50%); bottom:96px; width:38px; height:38px; border-radius:50%; background:var(--accent); color:#fff; border:none; font-size:15px; cursor:pointer; display:none; z-index:40; box-shadow:0 2px 10px rgba(0,0,0,.45); }
+  .scrollbtn.show { display:block; }
+  .copy { float:left; background:transparent; border:1px solid var(--line); color:var(--muted); border-radius:6px; font-size:11px; padding:2px 8px; cursor:pointer; }
+  .copy:hover { color:var(--txt); border-color:var(--accent); }
+  footer { border-top:1px solid var(--line); background:var(--panel); padding:10px 16px; }
+  body.dragging footer { box-shadow:inset 0 0 0 2px var(--accent); }
+  body.dragging::after { content:"שחרר כאן כדי לצרף קובץ"; position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(31,30,27,.82); color:var(--accent); font-size:20px; font-weight:600; z-index:50; pointer-events:none;
+    border:3px dashed var(--accent); }
+  .composer { max-width:860px; margin:0 auto; display:flex; gap:8px; align-items:flex-end; }
+  textarea { flex:1; resize:none; min-height:44px; max-height:160px; background:var(--panel2); color:var(--txt);
+    border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:15px; font-family:inherit; direction:rtl; }
+  textarea:focus { outline:none; border-color:var(--accent); }
+  .send { background:var(--accent); color:#fff; border:none; border-radius:10px; padding:0 18px; height:44px;
+    font-size:14px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .send:disabled { opacity:.5; cursor:default; }
+  .attach { background:var(--panel2); color:var(--muted); border:1px solid var(--line); border-radius:10px; height:44px; width:44px; font-size:18px; cursor:pointer; flex:none; }
+  .attach:hover { color:var(--txt); border-color:var(--accent); }
+  .chips { max-width:860px; margin:0 auto 8px; display:flex; flex-wrap:wrap; gap:8px; }
+  .imgchip { display:flex; align-items:center; gap:8px; background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:5px 8px; max-width:260px; }
+  .chip-preview { background:transparent; border:none; padding:0; cursor:pointer; display:flex; align-items:center; flex:none; }
+  .chip-preview img { height:36px; width:auto; max-width:54px; object-fit:cover; border-radius:6px; border:1px solid var(--line); }
+  .chip-preview span { font-size:26px; }
+  .chip-name { font-size:12px; color:var(--txt); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px; }
+  .chip-remove { background:transparent; border:none; color:var(--muted); font-size:15px; cursor:pointer; flex:none; }
+  .chip-remove:hover { color:var(--accent); }
+  .preview { position:fixed; inset:0; background:rgba(0,0,0,.78); z-index:100; display:flex; align-items:center; justify-content:center; }
+  .preview-inner { position:relative; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; max-width:90vw; max-height:90vh; display:flex; }
+  .preview-inner img { max-width:86vw; max-height:82vh; border-radius:8px; }
+  .preview-inner iframe { width:80vw; height:82vh; border:none; background:#fff; border-radius:8px; }
+  #previewClose { position:absolute; top:-14px; inset-inline-start:-14px; width:32px; height:32px; border-radius:50%; background:var(--accent); color:#fff; border:none; font-size:16px; cursor:pointer; }
+  .pv-other { color:var(--txt); padding:30px; text-align:center; font-size:15px; }
+  .pv-other a { color:var(--accent); }
+  .opts { max-width:860px; margin:6px auto 0; font-size:12px; color:var(--muted); display:flex; gap:14px; align-items:center; }
+  .opts label { cursor:pointer; }
+  #sendMsg { margin-inline-start:auto; }
+</style>
+</head>
+<body>
+<div class="app">
+<aside id="sidebar">
+  <div class="brand">Claude Portal<br><span>Free Agent</span></div>
+  <button id="newChat" class="side-btn primary">＋ שיחה חדשה</button>
+  <button id="addFolder" class="side-btn">📁 הוסף תיקייה</button>
+  <div id="folderList" class="folder-list"></div>
+  <div class="conv-head">שיחות אחרונות
+    <label class="follow-lbl"><input type="checkbox" id="followActive" checked> עקוב אחר הפעילה</label>
+  </div>
+  <div id="convList" class="conv-list"></div>
+  <div class="side-foot">
+    <div id="modelDisp" class="model-disp" title="המודל הפעיל"></div>
+    <button id="settingsBtn" class="side-btn">⚙ הגדרות תצוגה</button>
+  </div>
+</aside>
+<div id="sideResize" class="side-resize"></div>
+<div class="main">
+<header>
+  <select id="sessions"></select>
+  <span id="spin" class="spin"></span>
+  <button id="stopBtn" class="stopbtn" title="עצור את התשובה">■ עצור</button>
+  <span class="status"><span id="dot" class="dot"></span><span id="stat">מתחבר…</span></span>
+</header>
+<div id="log"><div class="wrap"><div class="empty" id="empty">טוען שיחות…</div></div></div>
+
+<button id="scrollBtn" class="scrollbtn" title="גלול לתחתית">▼</button>
+<div id="promptBanner" class="prompt-banner">
+  <div class="pb-title">🔔 Cowork ממתין לאישור</div>
+  <div id="pbText" class="pb-text"></div>
+  <div id="pbBtns" class="pb-btns"></div>
+</div>
+<footer>
+  <div id="tasksBar" class="tasksbar"></div>
+  <div id="chips" class="chips" style="display:none"></div>
+  <div class="composer">
+    <button class="attach" id="attach" title="צרף קבצים / צילומי מסך">📎</button>
+    <input type="file" id="fileInput" multiple style="display:none">
+    <textarea id="input" placeholder="כתוב כאן בעברית… (אפשר גם להדביק צילום מסך · Enter לשליחה · Shift+Enter לשורה חדשה)"></textarea>
+    <button class="send" id="send">שלח ל-Cowork</button>
+  </div>
+  <div id="preview" class="preview" style="display:none">
+    <div class="preview-inner">
+      <button id="previewClose" title="סגור">✕</button>
+      <div id="previewBody"></div>
+    </div>
+  </div>
+  <div class="opts">
+    <span id="ready" class="ready"></span>
+    <label><input type="checkbox" id="autoSubmit" checked> שלח אוטומטית (Enter)</label>
+    <label><input type="checkbox" id="soundToggle"> צליל בסיום</label>
+    <span id="sendMsg"></span>
+  </div>
+</footer>
+</div><!-- /main -->
+</div><!-- /app -->
+
+<div id="settings" class="settings-panel" style="display:none">
+  <div class="settings-inner">
+    <button id="settingsClose" title="סגור">✕</button>
+    <h3>הגדרות תצוגה</h3>
+
+    <div class="set-section">
+      <div class="set-label">רקע</div>
+      <div class="swatches" id="bgPresets"></div>
+      <div class="set-row">
+        <label class="mini">צבע מותאם <input type="color" id="setBg"></label>
+        <button id="setBgImgBtn" class="mini-btn" type="button">🖼 תמונה…</button>
+        <button id="setBgImgClear" class="mini-btn" type="button">נקה</button>
+      </div>
+      <input type="file" id="setBgImgInput" accept="image/*" style="display:none">
+    </div>
+
+    <div class="set-section">
+      <div class="set-label">גופן</div>
+      <div class="font-grid" id="fontGrid"></div>
+      <label class="set-row range-row">גודל
+        <input type="range" id="setFontSize" min="13" max="22" step="1">
+        <span id="fsVal" class="fs-val"></span>
+      </label>
+    </div>
+
+    <div class="set-section">
+      <div class="set-label">צבעי טקסט</div>
+      <div class="set-row">
+        <label class="mini">הטקסט שלך <input type="color" id="setUserColor"></label>
+        <label class="mini">תשובות Claude <input type="color" id="setClaudeColor"></label>
+      </div>
+    </div>
+
+    <button id="setReset" class="reset-btn">איפוס לברירת מחדל</button>
+  </div>
+</div>
+
+<div id="termsGate" class="terms-gate" style="display:none">
+  <div class="terms-card">
+    <h2>תנאי שימוש והגבלת אחריות</h2>
+    <div class="terms-body">
+      <p>לפני השימוש ב-<b>Claude Portal – Free Agent</b> עליך לקרוא ולהסכים לתנאים. עיקרי הדברים:</p>
+      <ul>
+        <li>התוכנה ניתנת <b>כמות שהיא (AS IS)</b>, ללא כל אחריות מכל סוג שהוא.</li>
+        <li>השימוש הוא על <b>אחריותך הבלעדית</b> — אתה נוטל על עצמך את מלוא הסיכון.</li>
+        <li>היוצר <b>פטור לחלוטין מכל אחריות</b> לכל נזק שהוא, ישיר או עקיף, לרבות אובדן או שיבוש נתונים.</li>
+        <li>התוכנה <b>קוראת חלונות ומזריקה קלט</b> לאפליקציית Claude — אתה מאשר זאת מפורשות.</li>
+        <li>אתה אחראי <b>לבדוק כל פעולה</b> שאתה מאשר דרך הפורטל (אישורים, שליחה, קבצים).</li>
+        <li>התוכנה <b>אינה קשורה ל-Anthropic</b>. בדיקות עדכון מתבצעות מול GitHub.</li>
+      </ul>
+      <p>הנוסח המלא והמחייב נמצא בקובץ <b>TERMS-תנאי-שימוש.txt</b> שבתיקיית ההתקנה.</p>
+    </div>
+    <div class="terms-foot">
+      <label class="terms-chk"><input type="checkbox" id="termsChk"> קראתי, הבנתי, ואני מסכים לתנאי השימוש ולהגבלת האחריות במלואם.</label>
+      <button id="termsAccept" class="terms-accept" disabled>אני מסכים — התחל</button>
+      <button id="termsDecline" class="terms-decline">אינני מסכים</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- first-run terms & consent gate (blocks use until accepted) ----
+const TERMS_VERSION = '1.0';
+(function termsGate(){
+  let acc=null; try{ acc=localStorage.getItem('cp_terms'); }catch(e){}
+  if (acc === TERMS_VERSION) return;                 // already accepted this version
+  const g=document.getElementById('termsGate'); if(!g) return;
+  g.style.display='flex';
+  const chk=document.getElementById('termsChk'), ok=document.getElementById('termsAccept');
+  if(chk&&ok){ chk.addEventListener('change',()=>{ ok.disabled=!chk.checked; }); }
+  if(ok){ ok.addEventListener('click',()=>{ try{ localStorage.setItem('cp_terms',TERMS_VERSION); }catch(e){} g.style.display='none'; }); }
+  const dec=document.getElementById('termsDecline');
+  if(dec){ dec.addEventListener('click',()=>{ document.body.innerHTML='<div style="color:#9a9389;font-family:sans-serif;text-align:center;margin-top:20vh;direction:rtl;font-size:15px">לא ניתן להשתמש בפורטל ללא הסכמה לתנאי השימוש.<br><br>סגור חלון זה.</div>'; }); }
+})();
+
+const logWrap = document.querySelector('#log .wrap');
+const sel = document.getElementById('sessions');
+const dot = document.getElementById('dot');
+const stat = document.getElementById('stat');
+let curId = null, offset = 0, byteCarry = new Uint8Array(0);
+const dec = new TextDecoder('utf-8');
+
+// ---- minimal markdown: code fences, inline code, bold ----
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+// Per-block direction: if the block contains ANY Hebrew, treat it as RTL — even
+// when it starts with an English/bold term. This avoids the first-strong-char
+// trap of unicode-bidi:plaintext (a Hebrew sentence opening with an English word
+// would otherwise flip to LTR). No Hebrew at all -> LTR.
+function dirAttr(s){ return /[֐-׿]/.test(s) ? ' dir="rtl"' : ' dir="ltr"'; }
+function renderMd(text){
+  const parts = text.split(/```/);
+  let html = '';
+  for (let i=0;i<parts.length;i++){
+    if (i%2===1){
+      let raw = parts[i];
+      let lang = '';
+      const lm = raw.match(/^([a-zA-Z0-9+#.\-]{1,15})\n/);
+      if (lm){ lang = lm[1]; raw = raw.slice(lm[0].length); }
+      raw = raw.replace(/\n$/,'');
+      html += '<div class="codewrap"><div class="codebar"><span class="codelang">'+esc(lang)+'</span>'
+            + '<button class="codecopy" type="button">העתק</button></div>'
+            + '<pre><code>'+esc(raw)+'</code></pre></div>';
+    } else {
+      html += renderBlocks(parts[i]);
+    }
+  }
+  return html;
+}
+
+// inline formatting: links, bold, italic, inline code
+function renderInline(s){
+  s = esc(s);
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+  return s;
+}
+
+// block formatting: headers, bullet/numbered lists, blockquotes, paragraphs
+function renderBlocks(text){
+  const lines = text.split('\n');
+  let html = '', listType = null, listBuf = [], para = [];
+  function flushList(){
+    if (listType){ html += '<'+listType+' class="md-list">' + listBuf.map(li=>'<li'+dirAttr(li)+'>'+li+'</li>').join('') + '</'+listType+'>'; listBuf=[]; listType=null; }
+  }
+  function flushPara(){ if (para.length){ const j=para.join('<br>'); html += '<p'+dirAttr(j)+'>'+j+'</p>'; para=[]; } }
+  for (const line of lines){
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    const ul = line.match(/^\s*[-*•]\s+(.*)$/);
+    const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    const bq = line.match(/^>\s?(.*)$/);
+    if (h){ flushPara(); flushList(); const lvl=Math.min(h[1].length+1,6); html += '<h'+lvl+' class="md-h"'+dirAttr(h[2])+'>'+renderInline(h[2])+'</h'+lvl+'>'; }
+    else if (ul){ flushPara(); if (listType && listType!=='ul') flushList(); listType='ul'; listBuf.push(renderInline(ul[1])); }
+    else if (ol){ flushPara(); if (listType && listType!=='ol') flushList(); listType='ol'; listBuf.push(renderInline(ol[1])); }
+    else if (bq){ flushPara(); flushList(); html += '<blockquote class="md-bq"'+dirAttr(bq[1])+'>'+renderInline(bq[1])+'</blockquote>'; }
+    else if (line.trim()===''){ flushPara(); flushList(); }
+    else { flushList(); para.push(renderInline(line)); }
+  }
+  flushPara(); flushList();
+  return html;
+}
+
+// id -> { el, body } for in-place updates (streaming grows the same bubble)
+const msgEls = new Map();
+let forceScroll = false;
+let keyCounter = 0;
+let busy = false;   // true while Claude is working (no 'result' line yet for the turn)
+let prevBusy = false;
+let followActive = true;   // mirror whichever conversation is currently active in Cowork
+let idleTicks = 0;  // consecutive polls with no new transcript bytes
+let pendingNewChat = false;     // "new chat" clicked: wait for a session id we've never seen
+let knownIds = null;            // Set of session ids from the previous /api/sessions poll
+
+function updateBusy(){
+  document.getElementById('spin').classList.toggle('on', busy);
+  const r = document.getElementById('ready');
+  const b = document.getElementById('send');
+  if (busy){
+    r.className = 'ready busy';  r.innerHTML = '<span class="spinner"></span>Claude עובד…';
+    if (b) b.classList.add('busy');
+  } else {
+    r.className = 'ready idle';  r.innerHTML = '<span class="rdot"></span>מוכן לשליחה';
+    if (b) b.classList.remove('busy');
+  }
+  const sb = document.getElementById('stopBtn');
+  if (sb) sb.classList.toggle('show', busy);
+}
+
+// ---- model display (read from the transcript's assistant messages) ----
+let currentModel = '';
+const MODEL_NAMES = { 'claude-opus-4-8':'Opus 4.8', 'claude-sonnet-4-6':'Sonnet 4.6', 'claude-haiku-4-5':'Haiku 4.5', 'claude-fable-5':'Fable 5' };
+function prettyModel(m){
+  for (const k in MODEL_NAMES){ if (m.indexOf(k)===0) return MODEL_NAMES[k]; }
+  return m.replace(/^claude-/,'').replace(/\[.*\]$/,'').replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+}
+function setModel(m){ if (m && m!==currentModel){ currentModel=m; const el=document.getElementById('modelDisp'); if(el) el.innerHTML='מודל: <b>'+esc(prettyModel(m))+'</b>'; } }
+
+// ---- task-list (progress bar) + working-folders mirror ----
+const tasks = new Map();   // taskId -> { subject, status }
+let createQueue = [];      // TaskCreate subjects awaiting their "Task #N created" result
+const folders = new Set(); // connected working folders seen in the transcript
+function resetMirrors(){ tasks.clear(); createQueue = []; folders.clear(); renderTasksBar(); renderFolders(); }
+function renderTasksBar(){
+  const tb = document.getElementById('tasksBar'); if (!tb) return;
+  if (!tasks.size){ tb.classList.remove('show'); tb.innerHTML=''; return; }
+  let done = 0;
+  for (const t of tasks.values()) if (t.status==='completed') done++;
+  let html = '<span class="task-head">משימות ' + done + '/' + tasks.size + '</span>';
+  for (const t of tasks.values()){
+    const cls = t.status==='completed' ? 'done' : (t.status==='in_progress' ? 'doing' : '');
+    const ic  = t.status==='completed' ? '✓' : (t.status==='in_progress' ? '⏳' : '○');
+    html += '<span class="task-item ' + cls + '" dir="auto">' + ic + ' ' + esc(t.subject) + '</span>';
+  }
+  tb.innerHTML = html; tb.classList.add('show');
+}
+function renderFolders(){
+  const fl = document.getElementById('folderList'); if (!fl) return;
+  fl.innerHTML = '';
+  for (const f of folders){
+    const d = document.createElement('div');
+    d.className = 'folder-chip'; d.title = f; d.textContent = '📂 ' + f;
+    fl.appendChild(d);
+  }
+}
+function trText(c){
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.filter(x=>x && x.type==='text').map(x=>x.text).join('\n');
+  return '';
+}
+function scanToolResult(b){
+  const t = trText(b.content);
+  if (!t) return;
+  let m = t.match(/Task #(\d+) created successfully: (.+)/);
+  if (m){
+    const subj = createQueue.length ? createQueue.shift() : m[2];
+    tasks.set(m[1], { subject: subj || m[2], status:'pending' });
+    renderTasksBar(); return;
+  }
+  m = t.match(/Folder connected: ([^\n]+)/);
+  if (m){ folders.add(m[1].trim()); renderFolders(); }
+}
+
+// ---- recent-conversations sidebar ----
+function renderConvList(list){
+  const cl = document.getElementById('convList');
+  if (!cl) return;
+  cl.innerHTML = '';
+  for (const s of list){
+    const d = document.createElement('div');
+    d.className = 'conv-item' + (s.id===curId ? ' active' : '');
+    d.dir = 'auto';
+    d.title = s.title;
+    d.innerHTML = (s.active ? '<span class="ci-dot">●</span>' : '') + esc(s.title);
+    d.onclick = ()=>{
+      followActive = false;                                   // browsing a specific conversation
+      const fe = document.getElementById('followActive'); if (fe) fe.checked = false;
+      try { localStorage.setItem('cp_follow','0'); } catch(e){}
+      sel.value = s.id; switchSession(s.id); renderConvList(list);
+    };
+    cl.appendChild(d);
+  }
+}
+
+function blockText(content){
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+  return '';
+}
+
+// Remove system-injected wrappers (e.g. the <uploaded_files>…</uploaded_files> block
+// Cowork adds when a file is attached) so they don't show as noise in the chat.
+function cleanUserText(t){
+  return String(t)
+    .replace(/<uploaded_files>[\s\S]*?<\/uploaded_files>/g, '')
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
+    .trim();
+}
+
+function toolLabel(b){
+  let label = b.name || 'tool';
+  const i = b.input || {};
+  const hint = i.query || i.command || i.pattern || i.file_path || i.path || i.url || i.prompt || i.subject;
+  if (hint) { let h = String(hint); if (h.length > 80) h = h.slice(0,80)+'…'; label += ': ' + h; }
+  return label;
+}
+
+// Get (or lazily create) the bubble for a message id. Blocks for one message
+// arrive as separate JSONL lines sharing the same id, so we ACCUMULATE segments
+// into the same bubble instead of replacing them.
+function getRec(id, role){
+  let rec = msgEls.get(id);
+  if (!rec){
+    const d = document.createElement('div');
+    d.className = 'msg ' + (role==='user'?'user':'assistant');
+    d.dir = 'rtl';
+    const head = document.createElement('div');
+    head.className = 'role'; head.dir = 'rtl';
+    const btn = document.createElement('button');
+    btn.className = 'copy'; btn.textContent = 'העתק';
+    const body = document.createElement('div');
+    body.className = 'body';
+    btn.onclick = () => navigator.clipboard.writeText(body.innerText);
+    head.append((role==='user'?'אתה':'Claude'), btn);
+    d.append(head, body);
+    logWrap.appendChild(d);
+    rec = { el:d, body, seen:new Set() };
+    msgEls.set(id, rec);
+    forceScroll = true;            // a brand-new message -> jump to bottom
+  }
+  return rec;
+}
+
+function renderAssistant(o){
+  const msg = o.message; if (!msg) return;
+  const id = msg.id || ('a' + (o.uuid || ('k'+(keyCounter++))));
+  const blocks = Array.isArray(msg.content)
+    ? msg.content
+    : (typeof msg.content === 'string' ? [{type:'text', text:msg.content}] : []);
+  const items = [];
+  for (const b of blocks){
+    if (b.type === 'text' && b.text){
+      items.push({ sig:'t|'+b.text, html:'<div class="seg"'+dirAttr(b.text)+'>' + renderMd(b.text) + '</div>' });
+    } else if (b.type === 'thinking' || b.type === 'redacted_thinking'){
+      const th = b.thinking || b.text || '(חושב…)';
+      items.push({ sig:'k|'+th, html:'<div class="seg think" dir="auto">' + esc(th) + '</div>' });
+    } else if (b.type === 'tool_use' && b.name === 'AskUserQuestion' && b.input && b.input.questions){
+      // Interactive: render the question with clickable option buttons that
+      // invoke the matching native button in Cowork.
+      let qh = '';
+      for (const q of b.input.questions){
+        qh += '<div class="aq-block" dir="auto" data-multi="' + (q.multiSelect?'1':'0') + '"><div class="aq-q">❓ ' + esc(q.question||'') + (q.multiSelect?' <span class="aq-desc">(אפשר לבחור כמה — לחץ על כל אחת)</span>':'') + '</div><div class="aq-opts">';
+        for (const op of (q.options||[])){
+          const lbl = (typeof op === 'string') ? op : (op.label||'');
+          const dsc = (op && typeof op === 'object' && op.description) ? op.description : '';
+          qh += '<button class="aq-btn" type="button" data-label="' + esc(lbl).replace(/"/g,'&quot;') + '">' + esc(lbl)
+              + (dsc ? '<span class="aq-desc">' + esc(dsc) + '</span>' : '') + '</button>';
+        }
+        qh += '</div><div class="aq-other"><input class="aq-other-in" placeholder="אחר — תשובה חופשית…"><button class="aq-other-btn" type="button">שלח</button></div></div>';
+      }
+      items.push({ sig:'q|'+JSON.stringify(b.input.questions).slice(0,180), html:qh });
+    } else if (b.type === 'tool_use'){
+      // task-list mirror: capture TaskCreate subjects / TaskUpdate statuses
+      if (b.name === 'TaskCreate' && b.input && b.input.subject){ createQueue.push(b.input.subject); }
+      else if (b.name === 'TaskUpdate' && b.input && b.input.taskId){
+        const tid = String(b.input.taskId), t = tasks.get(tid);
+        if (b.input.status === 'deleted'){ tasks.delete(tid); renderTasksBar(); }
+        else if (t && b.input.status){ t.status = b.input.status; renderTasksBar(); }
+      }
+      const lbl = toolLabel(b);
+      items.push({ sig:'u|'+lbl, html:'<div class="seg tooluse" dir="auto">⚙ ' + esc(lbl) + '</div>' });
+    }
+  }
+  if (!items.length) return;
+  const rec = getRec(id, 'assistant');
+  for (const it of items){
+    if (!rec.seen.has(it.sig)){ rec.seen.add(it.sig); rec.body.insertAdjacentHTML('beforeend', it.html); }
+  }
+}
+
+function renderUser(o){
+  const msg = o.message; if (!msg) return;
+  const c = msg.content;
+  if (Array.isArray(c)) for (const b of c){ if (b && b.type==='tool_result') scanToolResult(b); }
+  if (Array.isArray(c) && c.every(b=>b.type==='tool_result')) return; // skip tool-result turns
+  const id = msg.id || ('u' + (o.uuid || ('k'+(keyCounter++))));
+  const items = [];
+  if (typeof c === 'string'){
+    const ct = cleanUserText(c);
+    if (ct) items.push({ sig:'t|'+ct, html:'<div class="seg"'+dirAttr(ct)+'>'+renderMd(ct)+'</div>' });
+  } else if (Array.isArray(c)){
+    for (const b of c){
+      if (b.type === 'text' && b.text){
+        const ct = cleanUserText(b.text);
+        if (ct) items.push({ sig:'t|'+ct, html:'<div class="seg"'+dirAttr(ct)+'>'+renderMd(ct)+'</div>' });
+      } else if (b.type === 'image' && b.source && b.source.data){
+        // Attachments are embedded in the transcript as base64 - render a thumbnail.
+        const src = 'data:'+(b.source.media_type||'image/png')+';base64,'+b.source.data;
+        items.push({ sig:'i|'+b.source.data.length+'|'+b.source.data.slice(0,32), html:'<img class="att-img" src="'+src+'" title="לחץ להגדלה">' });
+      } else if (b.type && b.type !== 'tool_result'){
+        // document / other attachment block - show a file chip
+        const nm = b.title || b.name || b.file_name || (b.source && (b.source.file_name||b.source.url)) || 'קובץ מצורף';
+        items.push({ sig:'f|'+nm, html:'<div class="att-file">📄 '+esc(nm)+'</div>' });
+      }
+    }
+  }
+  if (!items.length) return;
+  const rec = getRec(id, 'user');
+  for (const it of items){
+    if (!rec.seen.has(it.sig)){ rec.seen.add(it.sig); rec.body.insertAdjacentHTML('beforeend', it.html); }
+  }
+}
+
+function handleLine(line){
+  line = line.trim();
+  if (!line) return;
+  let o; try { o = JSON.parse(line); } catch { return; }
+  if (o.type === 'result'){ busy = false; return; }   // turn finished
+  if (o.type === 'user'){ busy = true; renderUser(o); }
+  else if (o.type === 'assistant'){ busy = true; if (o.message && o.message.model) setModel(o.message.model); renderAssistant(o); }
+}
+
+function processBytes(newBytes){
+  // append to any carried-over partial-line bytes
+  const merged = new Uint8Array(byteCarry.length + newBytes.length);
+  merged.set(byteCarry); merged.set(newBytes, byteCarry.length);
+  // split on newline (0x0A) at the BYTE level — \n is never part of a multibyte char,
+  // so each complete line decodes cleanly regardless of where network chunks split.
+  let start = 0;
+  for (let i = 0; i < merged.length; i++){
+    if (merged[i] === 0x0A){
+      const lineBytes = merged.subarray(start, i);
+      handleLine(dec.decode(lineBytes));
+      start = i + 1;
+    }
+  }
+  byteCarry = merged.subarray(start); // incomplete trailing line, kept for next poll
+}
+
+async function loadSessions(){
+  const r = await fetch('/api/sessions'); const list = await r.json();
+  const prev = sel.value;
+  sel.innerHTML = '';
+  for (const s of list){
+    const o = document.createElement('option');
+    o.value = s.id;
+    o.textContent = (s.active?'🟢 ':'') + s.title + '  ·  ' + s.lastWrite;
+    sel.appendChild(o);
+  }
+  if (list.length){
+    if (pendingNewChat){
+      // Waiting for a brand-new conversation: switch only when an id appears
+      // that wasn't in the previous poll. Until then, keep the placeholder.
+      const fresh = knownIds ? list.find(s=>!knownIds.has(s.id)) : null;
+      if (fresh){ pendingNewChat = false; sel.value = fresh.id; switchSession(fresh.id); }
+    }
+    else if (followActive){
+      sel.value = list[0].id;                                          // mirror the active conversation
+      if (sel.value !== curId) switchSession(sel.value);
+    }
+    else {
+      if (prev && list.some(s=>s.id===prev)) sel.value = prev;
+      else { let saved=null; try{ saved=localStorage.getItem('cp_session'); }catch(e){} sel.value = (saved && list.some(s=>s.id===saved)) ? saved : list[0].id; }
+      if (sel.value !== curId) switchSession(sel.value);
+    }
+  } else {
+    const em = document.getElementById('empty'); if (em) em.textContent = 'לא נמצאו שיחות.';
+  }
+  knownIds = new Set(list.map(s=>s.id));
+  renderConvList(list);
+}
+
+function switchSession(id){
+  pendingNewChat = false;
+  curId = id; offset = 0; byteCarry = new Uint8Array(0);
+  msgEls.clear(); busy = false; prevBusy = false; forceScroll = false; idleTicks = 0;
+  resetMirrors();
+  logWrap.innerHTML = '';
+  try { localStorage.setItem('cp_session', id); } catch(e){}
+}
+
+async function poll(){
+  if (!curId){ await loadSessions(); setTimeout(poll, 1500); return; }
+  try {
+    const r = await fetch('/api/stream?id='+encodeURIComponent(curId)+'&from='+offset);
+    if (r.ok){
+      const to = parseInt(r.headers.get('X-To')||offset);
+      const buf = new Uint8Array(await r.arrayBuffer());
+      if (buf.length){ processBytes(buf); idleTicks = 0; }
+      else { idleTicks++; if (busy && idleTicks >= 20) busy = false; } // safety net only (~30s); the real done-signal is the 'result' line
+      offset = to;
+      dot.className='dot live'; stat.textContent='מחובר · '+new Date().toLocaleTimeString('he-IL');
+      if (prevBusy && !busy) onTurnFinished();   // reply just completed
+      prevBusy = busy;
+      updateBusy();
+      const log = document.getElementById('log');
+      const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 200;
+      if (forceScroll || nearBottom) log.scrollTop = log.scrollHeight;
+      forceScroll = false;
+      updateScrollBtn();
+    }
+  } catch(e){ dot.className='dot'; stat.textContent='שגיאת חיבור'; }
+  setTimeout(poll, 1500);
+}
+
+sel.addEventListener('change', ()=>switchSession(sel.value));
+setInterval(loadSessions, 8000);
+loadSessions().then(poll);
+
+// ---- scroll-to-bottom button ----
+const scrollBtn = document.getElementById('scrollBtn');
+const logEl = document.getElementById('log');
+const footerEl = document.querySelector('footer');
+function updateScrollBtn(){
+  const nearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 200;
+  scrollBtn.classList.toggle('show', !nearBottom);
+  if (footerEl) scrollBtn.style.bottom = (footerEl.offsetHeight + 14) + 'px';  // sit just above the composer
+}
+
+// ---- follow-active-conversation toggle ----
+try { const fv = localStorage.getItem('cp_follow'); if (fv!==null) followActive = fv==='1'; } catch(e){}
+const followEl = document.getElementById('followActive');
+if (followEl){
+  followEl.checked = followActive;
+  followEl.addEventListener('change', ()=>{
+    pendingNewChat = false;
+    followActive = followEl.checked;
+    try { localStorage.setItem('cp_follow', followActive?'1':'0'); } catch(e){}
+    if (followActive) loadSessions();   // jump to the active conversation now
+  });
+}
+logEl.addEventListener('scroll', updateScrollBtn);
+scrollBtn.addEventListener('click', ()=>{ logEl.scrollTop = logEl.scrollHeight; });
+
+// ---- new-reply notification (title blink + optional beep when tab unfocused) ----
+const soundToggle = document.getElementById('soundToggle');
+const origTitle = document.title;
+let blinkTimer = null;
+function startBlink(){ if (blinkTimer) return; let on=false; blinkTimer=setInterval(()=>{ document.title = on?origTitle:'🔔 תשובה חדשה'; on=!on; }, 900); }
+function stopBlink(){ if (blinkTimer){ clearInterval(blinkTimer); blinkTimer=null; document.title=origTitle; } }
+function beep(){
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.type='sine'; o.frequency.value=660; o.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(0.0001,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.15,ctx.currentTime+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.4);
+    o.start(); o.stop(ctx.currentTime+0.42);
+  }catch(e){}
+}
+function onTurnFinished(){ if (!document.hasFocus()){ startBlink(); if (soundToggle.checked) beep(); } }
+window.addEventListener('focus', stopBlink);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) stopBlink(); });
+
+// ---- preferences (localStorage) ----
+const autoSubmitEl = document.getElementById('autoSubmit');
+try {
+  const sa = localStorage.getItem('cp_autoSubmit'); if (sa!==null) autoSubmitEl.checked = sa==='1';
+  const ss = localStorage.getItem('cp_sound'); if (ss!==null) soundToggle.checked = ss==='1';
+} catch(e){}
+autoSubmitEl.addEventListener('change', ()=>{ try{ localStorage.setItem('cp_autoSubmit', autoSubmitEl.checked?'1':'0'); }catch(e){} });
+soundToggle.addEventListener('change', ()=>{ try{ localStorage.setItem('cp_sound', soundToggle.checked?'1':'0'); }catch(e){} });
+
+// ---- stop button ----
+document.getElementById('stopBtn').addEventListener('click', async ()=>{
+  try { await fetch('/api/stop', { method:'POST' }); } catch(e){}
+});
+
+// ---- sidebar actions (experimental: drive Cowork's native buttons) ----
+async function doAction(target, btn){
+  const old = btn.textContent; btn.disabled = true;
+  try {
+    const r = await fetch('/api/action', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ target }) });
+    const j = await r.json();
+    if (j.status !== 'ok'){ btn.textContent = '✗ לא נמצא הכפתור'; setTimeout(()=>btn.textContent=old, 2500); }
+  } catch(e){ btn.textContent = '✗ שגיאה'; setTimeout(()=>btn.textContent=old, 2500); }
+  btn.disabled = false;
+}
+document.getElementById('newChat').addEventListener('click', e=>{
+  followActive = true;
+  const fe=document.getElementById('followActive'); if(fe) fe.checked=true;
+  try{ localStorage.setItem('cp_follow','1'); }catch(e){}
+  // Show a fresh, empty view immediately and wait for the new session id.
+  curId = null; offset = 0; byteCarry = new Uint8Array(0);
+  msgEls.clear(); busy = false; prevBusy = false; idleTicks = 0; updateBusy(); resetMirrors();
+  logWrap.innerHTML = '<div class="empty" id="empty">שיחה חדשה נפתחה ב-Cowork ✓<br><br>כתוב למטה ושלח — השיחה תופיע כאן עם ההודעה הראשונה.</div>';
+  pendingNewChat = true;
+  doAction('newchat', e.currentTarget);
+});
+document.getElementById('addFolder').addEventListener('click', e=>doAction('addfolder', e.currentTarget));
+
+// ---- approval-dialog mirror: poll /api/prompt, answer from the portal ----
+const pbEl = document.getElementById('promptBanner');
+const pbText = document.getElementById('pbText');
+const pbBtns = document.getElementById('pbBtns');
+let pbHandled = '';   // signature of a prompt we already answered (don't re-show)
+function promptSig(j){ return (j.text||'') + '|' + (j.buttons||[]).join(','); }
+async function pollPrompt(){
+  try {
+    const r = await fetch('/api/prompt');
+    if (r.ok){
+      const j = await r.json();
+      if (j.found && (j.buttons||[]).length && promptSig(j) !== pbHandled){
+        pbText.textContent = j.text || 'התקבלה בקשת אישור ב-Cowork';
+        pbBtns.innerHTML = '';
+        (j.buttons||[]).forEach((bname, i)=>{
+          const btn = document.createElement('button');
+          btn.className = 'pb-btn' + (i ? ' secondary' : '');
+          btn.textContent = bname;
+          btn.onclick = async ()=>{
+            const sig = promptSig(j);
+            pbBtns.querySelectorAll('.pb-btn').forEach(x=>x.disabled=true);
+            const old = btn.textContent; btn.textContent = '⏳ ' + old;
+            try {
+              const res = await fetch('/api/action', { method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ pattern: bname }) }).then(r=>r.json());
+              if (res && res.status === 'ok'){
+                pbHandled = sig;                 // succeeded - don't re-show this prompt
+                pbEl.classList.remove('show');
+              } else {
+                btn.textContent = '✗ נכשל — נסה ב-Cowork';
+                pbBtns.querySelectorAll('.pb-btn').forEach(x=>x.disabled=false);
+              }
+            } catch(e){
+              btn.textContent = '✗ שגיאה';
+              pbBtns.querySelectorAll('.pb-btn').forEach(x=>x.disabled=false);
+            }
+          };
+          pbBtns.appendChild(btn);
+        });
+        pbEl.classList.add('show');
+      } else if (!j.found){
+        pbEl.classList.remove('show'); pbHandled = '';
+      }
+    }
+  } catch(e){}
+  setTimeout(pollPrompt, 2500);
+}
+pollPrompt();
+
+// Lock a whole question block once it has been answered (an option chosen or a
+// free-text reply sent), so stale questions can't be answered twice.
+function lockAqBlock(el){
+  const block = el.closest && el.closest('.aq-block');
+  if (!block) return;
+  block.classList.add('answered');
+  block.querySelectorAll('.aq-btn, .aq-other-in, .aq-other-btn').forEach(x=>{ x.disabled = true; });
+}
+
+// ---- AskUserQuestion option clicks -> invoke the matching Cowork button ----
+logWrap.addEventListener('click', e=>{
+  // "Other" free-text answer: send it into the Cowork composer like a regular message
+  const ob = e.target.closest && e.target.closest('.aq-other-btn');
+  if (ob){
+    const inp = ob.parentElement.querySelector('.aq-other-in');
+    const txt = (inp && inp.value || '').trim();
+    if (!txt) return;
+    ob.disabled = true; if(inp) inp.disabled = true; ob.textContent = 'שולח…';
+    fetch('/api/send', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ text: txt, submit: true, files: [] }) })
+      .then(r=>r.json())
+      .then(j=>{ if (j.status==='ok'){ ob.textContent='✓ נשלח'; lockAqBlock(ob); } else { ob.textContent='✗ שגיאה'; ob.disabled=false; if(inp) inp.disabled=false; } })
+      .catch(()=>{ ob.textContent='✗ שגיאה'; ob.disabled=false; if(inp) inp.disabled=false; });
+    return;
+  }
+  const aq = e.target.closest && e.target.closest('.aq-btn');
+  if (!aq || aq.disabled) return;
+  const label = aq.dataset.label || aq.textContent;
+  aq.disabled = true;
+  fetch('/api/action', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ pattern: label }) })
+    .then(r=>r.json())
+    .then(j=>{
+      if (j.status === 'ok'){
+        aq.classList.add('sent');
+        const block = aq.closest('.aq-block');
+        // single-select: lock the whole block; multi-select: keep the rest clickable
+        if (!block || block.dataset.multi !== '1') lockAqBlock(aq);
+      }
+      else { aq.classList.add('fail'); aq.disabled = false; aq.title = 'הכפתור לא נמצא ב-Cowork (' + j.status + ')'; }
+    })
+    .catch(()=>{ aq.classList.add('fail'); aq.disabled = false; });
+});
+// Enter inside the "other" free-text field sends it
+logWrap.addEventListener('keydown', e=>{
+  if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('aq-other-in')){
+    e.preventDefault();
+    const b = e.target.parentElement.querySelector('.aq-other-btn');
+    if (b && !b.disabled) b.click();
+  }
+});
+
+// ---- customization / theme settings ----
+const root = document.documentElement;
+const settingsEl = document.getElementById('settings');
+function loadTheme(){ try { return JSON.parse(localStorage.getItem('cp_theme')||'{}'); } catch(e){ return {}; } }
+function saveTheme(){ try { localStorage.setItem('cp_theme', JSON.stringify(theme)); } catch(e){} }
+function applyTheme(){
+  if (theme.font) root.style.setProperty('--font', theme.font);
+  if (theme.fontsize) root.style.setProperty('--fontsize', theme.fontsize+'px');
+  if (theme.userColor) root.style.setProperty('--user-color', theme.userColor);
+  if (theme.claudeColor) root.style.setProperty('--claude-color', theme.claudeColor);
+  if (theme.bg) root.style.setProperty('--bg', theme.bg);
+  if (theme.bgImage) root.style.setProperty('--bg-image', theme.bgImage);
+}
+let theme = loadTheme(); applyTheme();
+
+const setFontSize=document.getElementById('setFontSize'), fsVal=document.getElementById('fsVal'),
+      setUserColor=document.getElementById('setUserColor'), setClaudeColor=document.getElementById('setClaudeColor'),
+      setBg=document.getElementById('setBg');
+
+// font options (Hebrew + English). Google fonts loaded via <link>; system fallbacks too.
+const FONTS=[
+  {name:'Heebo',   css:'"Heebo",sans-serif'},
+  {name:'Rubik',   css:'"Rubik",sans-serif'},
+  {name:'Assistant',css:'"Assistant",sans-serif'},
+  {name:'Noto Hebrew', css:'"Noto Sans Hebrew",sans-serif'},
+  {name:'Secular One', css:'"Secular One",sans-serif'},
+  {name:'Segoe UI', css:'"Segoe UI",Arial,sans-serif'},
+  {name:'David (serif)', css:'"David Libre","David",Georgia,serif'},
+  {name:'Mono', css:'"Cascadia Code","Consolas",monospace'}
+];
+// background presets: solids, gradients and richer "scene" gradients
+const PRESETS=[
+  {bg:'#1f1e1b', img:'none'}, {bg:'#0d0d0d', img:'none'}, {bg:'#101826', img:'none'}, {bg:'#241c16', img:'none'},
+  {bg:'#12100f', img:'linear-gradient(160deg,#2a2017,#12100f)'},
+  {bg:'#0a1518', img:'linear-gradient(160deg,#0f2420,#0a1518)'},
+  {bg:'#141019', img:'linear-gradient(160deg,#2a1730,#120c18)'},
+  {bg:'#0d1326', img:'linear-gradient(160deg,#16264d,#0a0f1f)'},
+  {bg:'#1a0f12', img:'linear-gradient(160deg,#3a1620,#140a0d)'},
+  {bg:'#101a14', img:'linear-gradient(160deg,#16301f,#0a130d)'},
+  {bg:'#1d1206', img:'radial-gradient(circle at 30% 20%,#3a2810,#150d05)'},
+  {bg:'#0f1020', img:'radial-gradient(circle at 70% 30%,#23243f,#0b0b16)'}
+];
+
+function buildFontGrid(){
+  const g=document.getElementById('fontGrid'); g.innerHTML='';
+  FONTS.forEach(f=>{
+    const c=document.createElement('div');
+    c.className='font-card'+(((theme.font||'')===f.css)?' active':'');
+    c.innerHTML='<div class="fc-name">'+f.name+'</div><div class="fc-prev" style="font-family:'+f.css+'">אבג Abg</div>';
+    c.onclick=()=>{ theme.font=f.css; applyTheme(); saveTheme(); buildFontGrid(); };
+    g.appendChild(c);
+  });
+}
+function buildSwatches(){
+  const g=document.getElementById('bgPresets'); g.innerHTML='';
+  PRESETS.forEach(p=>{
+    const sw=document.createElement('div');
+    const isActive=(theme.bg===p.bg && (theme.bgImage||'none')===p.img);
+    sw.className='swatch'+(isActive?' active':'');
+    sw.style.background = p.img==='none' ? p.bg : p.img;
+    sw.onclick=()=>{ theme.bg=p.bg; theme.bgImage=p.img; applyTheme(); saveTheme(); setBg.value=p.bg; buildSwatches(); };
+    g.appendChild(sw);
+  });
+}
+
+function openSettings(){
+  setFontSize.value = parseInt(theme.fontsize || 15);
+  fsVal.textContent = setFontSize.value + 'px';
+  setUserColor.value = theme.userColor || '#ece7df';
+  setClaudeColor.value = theme.claudeColor || '#ece7df';
+  setBg.value = theme.bg || '#1f1e1b';
+  buildFontGrid(); buildSwatches();
+  settingsEl.style.display = 'flex';
+}
+document.getElementById('settingsBtn').addEventListener('click', openSettings);
+document.getElementById('settingsClose').addEventListener('click', ()=>settingsEl.style.display='none');
+settingsEl.addEventListener('click', e=>{ if (e.target===settingsEl) settingsEl.style.display='none'; });
+
+setFontSize.addEventListener('input', ()=>{ theme.fontsize=setFontSize.value; fsVal.textContent=setFontSize.value+'px'; applyTheme(); saveTheme(); });
+setUserColor.addEventListener('input', ()=>{ theme.userColor=setUserColor.value; applyTheme(); saveTheme(); });
+setClaudeColor.addEventListener('input', ()=>{ theme.claudeColor=setClaudeColor.value; applyTheme(); saveTheme(); });
+setBg.addEventListener('input', ()=>{ theme.bg=setBg.value; theme.bgImage='none'; applyTheme(); saveTheme(); buildSwatches(); });
+
+document.getElementById('setBgImgBtn').addEventListener('click', ()=>document.getElementById('setBgImgInput').click());
+document.getElementById('setBgImgInput').addEventListener('change', function(){
+  const f=this.files&&this.files[0]; if(!f) return;
+  const rd=new FileReader(); rd.onload=()=>{ theme.bgImage='url("'+rd.result+'")'; applyTheme(); saveTheme(); buildSwatches(); }; rd.readAsDataURL(f);
+});
+document.getElementById('setBgImgClear').addEventListener('click', ()=>{ theme.bgImage='none'; applyTheme(); saveTheme(); buildSwatches(); });
+
+document.getElementById('setReset').addEventListener('click', ()=>{
+  theme={}; saveTheme();
+  ['--font','--fontsize','--user-color','--claude-color','--bg','--bg-image'].forEach(v=>root.style.removeProperty(v));
+  openSettings();
+});
+
+// ---- resizable sidebar ----
+const sideResize=document.getElementById('sideResize'), sidebarEl=document.getElementById('sidebar');
+try { const w=localStorage.getItem('cp_sidebarW'); if(w) sidebarEl.style.width=w+'px'; } catch(e){}
+let resizing=false;
+sideResize.addEventListener('mousedown', e=>{ resizing=true; e.preventDefault(); document.body.style.userSelect='none'; });
+window.addEventListener('mousemove', e=>{ if(!resizing) return; const w=Math.min(Math.max(e.clientX,160),520); sidebarEl.style.width=w+'px'; });
+window.addEventListener('mouseup', ()=>{ if(resizing){ resizing=false; document.body.style.userSelect=''; try{ localStorage.setItem('cp_sidebarW', parseInt(sidebarEl.style.width)); }catch(e){} } });
+
+// ---- composer: send typed Hebrew into the Cowork window ----
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const sendMsg = document.getElementById('sendMsg');
+const autoSubmit = document.getElementById('autoSubmit');
+
+function autosize(){ input.style.height='44px'; input.style.height=Math.min(input.scrollHeight,160)+'px'; }
+input.addEventListener('input', autosize);
+
+// ---- file / screenshot attachment (any file type, multiple) ----
+let pendingFiles = []; // [{ dataUrl, name, type }]
+const attachBtn = document.getElementById('attach');
+const fileInput = document.getElementById('fileInput');
+const chipsEl = document.getElementById('chips');
+
+function isImg(type){ return type && type.startsWith('image/'); }
+function renderChips(){
+  chipsEl.innerHTML = '';
+  chipsEl.style.display = pendingFiles.length ? 'flex' : 'none';
+  pendingFiles.forEach((f, idx)=>{
+    const chip = document.createElement('div'); chip.className = 'imgchip';
+    const prev = document.createElement('button'); prev.className = 'chip-preview'; prev.title = 'תצוגה מקדימה';
+    if (isImg(f.type)){ const im = document.createElement('img'); im.src = f.dataUrl; prev.appendChild(im); }
+    else { const ic = document.createElement('span'); ic.textContent = '📄'; prev.appendChild(ic); }
+    prev.onclick = ()=>openPreview(f);
+    const nm = document.createElement('span'); nm.className = 'chip-name'; nm.textContent = f.name;
+    const rm = document.createElement('button'); rm.className = 'chip-remove'; rm.textContent = '✕'; rm.title = 'הסר';
+    rm.onclick = ()=>{ pendingFiles.splice(idx,1); renderChips(); };
+    chip.append(prev, nm, rm);
+    chipsEl.appendChild(chip);
+  });
+}
+function clearFiles(){ pendingFiles = []; renderChips(); fileInput.value=''; }
+function addFile(f){ const rd=new FileReader(); rd.onload=()=>{ pendingFiles.push({ dataUrl:rd.result, name:f.name||'קובץ', type:f.type||'' }); renderChips(); }; rd.readAsDataURL(f); }
+function addFiles(list){ for (const f of list) addFile(f); }
+
+attachBtn.addEventListener('click', ()=>fileInput.click());
+fileInput.addEventListener('change', ()=>{ if (fileInput.files && fileInput.files.length) addFiles(fileInput.files); });
+input.addEventListener('paste', e=>{
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  let got = false;
+  for (const it of items){
+    if (it.kind === 'file'){ const f = it.getAsFile(); if (f){ addFile(f); got = true; } }
+  }
+  if (got) e.preventDefault();
+});
+
+// ---- drag & drop any files anywhere on the portal ----
+function hasFiles(e){ return e.dataTransfer && Array.from(e.dataTransfer.types||[]).includes('Files'); }
+['dragenter','dragover'].forEach(ev=>document.addEventListener(ev, e=>{
+  if (hasFiles(e)){ e.preventDefault(); document.body.classList.add('dragging'); }
+}));
+['dragleave','dragend'].forEach(ev=>document.addEventListener(ev, e=>{
+  if (e.relatedTarget === null) document.body.classList.remove('dragging');
+}));
+document.addEventListener('drop', e=>{
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  document.body.classList.remove('dragging');
+  if (e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+});
+
+// ---- preview modal ----
+const previewEl = document.getElementById('preview');
+const previewBody = document.getElementById('previewBody');
+function openPreview(f){
+  if (!f) return;
+  if (isImg(f.type)) previewBody.innerHTML = '<img src="'+f.dataUrl+'">';
+  else if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) previewBody.innerHTML = '<iframe src="'+f.dataUrl+'"></iframe>';
+  else previewBody.innerHTML = '<div class="pv-other">'+esc(f.name)+'<br><br><a href="'+f.dataUrl+'" download="'+esc(f.name)+'">הורד קובץ</a></div>';
+  previewEl.style.display = 'flex';
+}
+function closePreview(){ previewEl.style.display = 'none'; previewBody.innerHTML=''; }
+document.getElementById('previewClose').addEventListener('click', closePreview);
+previewEl.addEventListener('click', e=>{ if (e.target === previewEl) closePreview(); });
+logWrap.addEventListener('click', e=>{
+  // click an attached image in the chat history to enlarge it
+  const im = e.target.closest && e.target.closest('img.att-img');
+  if (im){ previewBody.innerHTML = '<img src="'+im.src+'">'; previewEl.style.display = 'flex'; return; }
+  // per-block copy button for code / commands / prompts
+  const cc = e.target.closest && e.target.closest('.codecopy');
+  if (cc){
+    const code = cc.closest('.codewrap').querySelector('code');
+    if (code){ navigator.clipboard.writeText(code.textContent); const o=cc.textContent; cc.textContent='✓ הועתק'; setTimeout(()=>cc.textContent=o,1500); }
+  }
+});
+
+async function doSend(){
+  const text = input.value;
+  if (!text.trim() && !pendingFiles.length) return;
+  sendBtn.disabled = true; sendMsg.textContent = 'שולח…';
+  try {
+    const r = await fetch('/api/send', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        text, submit: autoSubmit.checked,
+        files: pendingFiles.map(f=>({ data:f.dataUrl, name:f.name, type:f.type }))
+      })
+    });
+    const j = await r.json();
+    if (j.status==='ok'){
+      sendMsg.textContent = autoSubmit.checked ? '✓ נשלח' : '✓ הודבק (לחץ Enter ב-Cowork)';
+      input.value=''; autosize(); clearFiles();
+    } else if (j.status==='window-not-found'){
+      sendMsg.textContent = '✗ חלון Claude לא נמצא — ודא שהאפליקציה פתוחה';
+    } else if (j.status==='focus-failed'){
+      sendMsg.textContent = '✗ לא הצלחתי למקד את החלון — נסה שוב';
+    } else {
+      sendMsg.textContent = '✗ שגיאה: '+j.status;
+    }
+  } catch(e){ sendMsg.textContent = '✗ שגיאת חיבור לשרת'; }
+  sendBtn.disabled = false;
+  setTimeout(()=>{ sendMsg.textContent=''; }, 5000);
+}
+
+sendBtn.addEventListener('click', doSend);
+input.addEventListener('keydown', e=>{
+  if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); doSend(); }
+});
+</script>
+</body>
+</html>
