@@ -53,6 +53,7 @@ public class Win32 {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr ProcessId);
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
@@ -157,6 +158,14 @@ public class Win32 {
 "@
 
 try { [Win32]::SetProcessDPIAware() | Out-Null } catch { }
+
+# When the server runs hidden (no console), a Write-Host + Read-Host error would hang
+# invisibly. Show a visible message box instead so startup failures are never silent.
+function Fail([string]$msg) {
+    Write-Host $msg -ForegroundColor Red
+    try { [System.Windows.Forms.MessageBox]::Show($msg, 'Claude Cowork Portal', 'OK', 'Error') | Out-Null } catch { }
+    exit 1
+}
 
 # Find the composer text element via UI Automation. Returns the element or $null.
 # Electron/Chromium builds its accessibility tree lazily: the first FromHandle call
@@ -467,7 +476,8 @@ function Send-Foreground([string]$text, [bool]$submit) {
     try {
         $proc = Find-ClaudeWindow
         if (-not $proc) { return 'window-not-found' }
-        [System.Windows.Forms.Clipboard]::SetText($text)
+        # NOTE: we deliberately do NOT touch the clipboard here - the text is TYPED,
+        # so there is no need to overwrite the user's clipboard / Win+V history.
         $hwnd = $proc.MainWindowHandle
         [Win32]::ForceForeground($hwnd) | Out-Null
         Start-Sleep -Milliseconds 300
@@ -622,7 +632,17 @@ function Send-Background([string]$text, [bool]$submit, $files) {
 
         [System.Windows.Forms.Clipboard]::SetText($text)   # backup so user can Ctrl+V
         $el = Find-Composer $hwnd
-        if (-not $el) { return 'composer-not-found' }
+        if (-not $el) {
+            # UIA didn't expose the composer (its a11y tree can be slow/asleep).
+            # Fall back to the reliable geometric method: foreground + click the
+            # composer area + type. Then return focus to the portal.
+            Write-Host "  composer not found via UIA - falling back to foreground+type" -ForegroundColor Yellow
+            $fg = Send-Foreground $text $submit
+            if ($prevFg -ne [IntPtr]::Zero -and $prevFg -ne $hwnd -and [Win32]::GetForegroundWindow() -ne $prevFg) {
+                [Win32]::ForceForegroundKeep($prevFg) | Out-Null
+            }
+            return $fg
+        }
 
         # 1) Put the text in the box via ValuePattern - no focus / no foreground.
         $vp = $null; $set = $false
@@ -689,19 +709,26 @@ function Send-Background([string]$text, [bool]$submit, $files) {
     }
 }
 
-# Dispatcher: background mode is the chosen default.
+# Dispatcher. Files go through the background/paste path. Plain TEXT is TYPED via
+# real keystrokes (Send-Foreground) - typing fires the input events that Cowork's
+# React composer needs, so the Send button enables and the message actually sends.
+# (ValuePattern.SetValue fills the DOM but React ignores it -> "copied but not sent".)
 function Send-ToCowork([string]$text, [bool]$submit, $files) {
-    return (Send-Background $text $submit $files)
+    if ($files -and $files.Count -gt 0) { return (Send-Background $text $submit $files) }
+    $prevFg = [Win32]::GetForegroundWindow()
+    $r = Send-Foreground $text $submit
+    try { if ($prevFg -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -ne $prevFg) { [Win32]::ForceForegroundKeep($prevFg) | Out-Null } } catch { }
+    return $r
 }
 
 # --- Locate Claude session storage (MSIX virtualized path) ---
 $pkg = Get-ChildItem "$env:LOCALAPPDATA\Packages" -Directory -Filter 'Claude_*' -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $pkg) { Write-Host "Claude Desktop package not found." -ForegroundColor Red; Read-Host "Enter to exit"; exit 1 }
+if (-not $pkg) { Fail "Claude Desktop is not installed (Claude package not found). Install Claude Desktop and try again." }
 $sessRoot = Join-Path $pkg.FullName 'LocalCache\Roaming\Claude\local-agent-mode-sessions'
-if (-not (Test-Path $sessRoot)) { Write-Host "Session folder not found: $sessRoot" -ForegroundColor Red; Read-Host "Enter to exit"; exit 1 }
+if (-not (Test-Path $sessRoot)) { Fail ("Claude session folder not found:`n" + $sessRoot + "`n`nOpen Claude Desktop at least once, then try again.") }
 
 $htmlPath = Join-Path $PSScriptRoot 'ClaudePortal.html'
-if (-not (Test-Path $htmlPath)) { Write-Host "ClaudePortal.html missing (must sit next to this script)." -ForegroundColor Red; Read-Host "Enter to exit"; exit 1 }
+if (-not (Test-Path $htmlPath)) { Fail "ClaudePortal.html is missing (it must sit next to the server script)." }
 
 # --- Auto-update: pull a newer SIGNED build from GitHub if one is published ---
 # Returns $true if an update was applied (and a fresh instance was launched), so the
@@ -860,7 +887,7 @@ foreach ($p in 8377..8384) {
         break
     } catch { }
 }
-if (-not $port) { Write-Host "No free port 8377-8384." -ForegroundColor Red; exit 1 }
+if (-not $port) { Fail "No free port in range 8377-8384. Close other instances and try again." }
 
 $url = "http://localhost:$port/"
 Write-Host ""
@@ -885,9 +912,87 @@ function Send-Text($resp, [string]$text, $contentType) {
 $MaxInitialBytes = 8MB
 $MaxChunk = 2MB
 
+# --- System tray icon + right-click menu (replaces a taskbar window) ---
+$script:RunKeyPath   = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$script:RunKeyName   = 'ClaudePortal'
+$script:LauncherPath = Join-Path $PSScriptRoot 'ClaudePortalHidden.vbs'
+function Test-AutoStart {
+    try { return [bool]((Get-ItemProperty -Path $script:RunKeyPath -Name $script:RunKeyName -ErrorAction SilentlyContinue).$($script:RunKeyName)) } catch { return $false }
+}
+function Set-AutoStart([bool]$on) {
+    try {
+        if ($on) { Set-ItemProperty -Path $script:RunKeyPath -Name $script:RunKeyName -Value ('wscript.exe "' + $script:LauncherPath + '"') }
+        else     { Remove-ItemProperty -Path $script:RunKeyPath -Name $script:RunKeyName -ErrorAction SilentlyContinue }
+    } catch { }
+}
+function New-PortalIcon {
+    # Draw the "Stargate" portal icon in GDI+ (no external .ico file needed).
+    try {
+        $bmp = [System.Drawing.Bitmap]::new(32,32)
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.Clear([System.Drawing.Color]::Transparent)
+        $gp = [System.Drawing.Drawing2D.GraphicsPath]::new()
+        $gp.AddEllipse(6,6,20,20)
+        $pgb = [System.Drawing.Drawing2D.PathGradientBrush]::new($gp)
+        $pgb.CenterColor = [System.Drawing.Color]::FromArgb(255,190,242,255)
+        $pgb.SurroundColors = ,([System.Drawing.Color]::FromArgb(255,10,46,66))
+        $g.FillEllipse($pgb,6,6,20,20)
+        $pen = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(255,38,201,226), [single]3.2)
+        $g.DrawEllipse($pen,3,3,26,26)
+        $dotB = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255,150,236,255))
+        foreach ($p in @(@(16,2.5),@(27.5,10.5),@(23,26),@(9,26),@(4.5,10.5))) {
+            $g.FillEllipse($dotB, [single]($p[0]-1.7), [single]($p[1]-1.7), [single]3.4, [single]3.4)
+        }
+        $g.Dispose()
+        return [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+    } catch { return [System.Drawing.SystemIcons]::Application }
+}
+
+$script:Notify = $null
+try {
+    $script:Notify = New-Object System.Windows.Forms.NotifyIcon
+    $script:Notify.Icon = (New-PortalIcon)
+    $script:Notify.Text = 'Claude Cowork Portal'
+    $menu = New-Object System.Windows.Forms.ContextMenuStrip
+
+    $miOpen = $menu.Items.Add('Open Portal')
+    $miOpen.add_Click({ Start-Process $url }.GetNewClosure())
+
+    $miUpd = $menu.Items.Add('Check for updates')
+    $miUpd.add_Click({
+        if (Invoke-UpdateCheck) { try { $script:Notify.Visible = $false } catch {}; try { $listener.Stop() } catch {}; exit }
+        else { try { $script:Notify.ShowBalloonTip(3000, 'Claude Cowork Portal', 'You are running the latest version.', [System.Windows.Forms.ToolTipIcon]::Info) } catch {} }
+    }.GetNewClosure())
+
+    $miAuto = New-Object System.Windows.Forms.ToolStripMenuItem('Start with Windows')
+    $miAuto.CheckOnClick = $true
+    $miAuto.Checked = (Test-AutoStart)
+    $miAuto.add_Click({ Set-AutoStart($miAuto.Checked) }.GetNewClosure())
+    [void]$menu.Items.Add($miAuto)
+
+    [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+
+    $miQuit = $menu.Items.Add('Quit Claude Portal')
+    $miQuit.add_Click({ try { $script:Notify.Visible = $false; $script:Notify.Dispose() } catch {}; try { Remove-Item $pidFile -Force -ErrorAction SilentlyContinue } catch {}; try { $listener.Stop() } catch {}; exit }.GetNewClosure())
+
+    $script:Notify.ContextMenuStrip = $menu
+    $script:Notify.add_MouseClick({ param($s,$e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Start-Process $url } }.GetNewClosure())
+    $script:Notify.Visible = $true
+} catch { Write-Host ("  tray icon unavailable: " + $_.Exception.Message) -ForegroundColor Yellow }
+
+# Hide the console window so only the tray icon remains (skip for a diagnostic run,
+# or if the tray icon failed to appear - never leave the user with no window at all).
+if ($script:Notify -and $script:Notify.Visible -and $env:CLAUDEPORTAL_VISIBLE -ne '1') {
+    try { [Win32]::ShowWindow([Win32]::GetConsoleWindow(), 0) | Out-Null } catch { }   # 0 = SW_HIDE
+}
+
+$asyncCtx = $null
 while ($listener.IsListening) {
     try {
-        $ctx = $listener.GetContext()
+        if ($null -eq $asyncCtx) { $asyncCtx = $listener.BeginGetContext($null, $null) }
+        if (-not $asyncCtx.AsyncWaitHandle.WaitOne(100)) { [System.Windows.Forms.Application]::DoEvents(); continue }
+        $ctx = $listener.EndGetContext($asyncCtx); $asyncCtx = $null
         $req = $ctx.Request
         $resp = $ctx.Response
         $path = $req.Url.AbsolutePath
@@ -902,6 +1007,15 @@ while ($listener.IsListening) {
         elseif ($path -eq '/api/stop' -and $req.HttpMethod -eq 'POST') {
             $r = Send-Stop
             Send-Text $resp ('{"status":"' + $r + '"}') 'application/json'
+        }
+        elseif ($path -eq '/api/shutdown' -and $req.HttpMethod -eq 'POST') {
+            # Cleanly stop the (hidden) server from inside the portal.
+            Send-Text $resp '{"status":"ok"}' 'application/json'
+            Start-Sleep -Milliseconds 250
+            try { if ($script:Notify) { $script:Notify.Visible = $false; $script:Notify.Dispose() } } catch { }
+            try { $listener.Stop() } catch { }
+            try { Remove-Item (Join-Path $env:TEMP 'ClaudePortal.pids') -Force -ErrorAction SilentlyContinue } catch { }
+            exit 0
         }
         elseif ($path -eq '/api/action' -and $req.HttpMethod -eq 'POST') {
             $reader = New-Object System.IO.StreamReader($req.InputStream, [System.Text.Encoding]::UTF8)
@@ -977,14 +1091,17 @@ while ($listener.IsListening) {
             Send-Text $resp 'not found' 'text/plain'
         }
     } catch {
+        $asyncCtx = $null
         try { $ctx.Response.StatusCode = 500; $ctx.Response.Close() } catch { }
     }
 }
+if ($script:Notify) { try { $script:Notify.Visible = $false; $script:Notify.Dispose() } catch { } }
+# (end of script - this trailing comment shields the code from signature-block edits
 # SIG # Begin signature block
 # MIImpgYJKoZIhvcNAQcCoIImlzCCJpMCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDMKc0laPi6HJ7g
-# aJvkwl6TPL7x4gZ3Nt4KfVB7o/hv36CCIDYwggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYsVsGLKutKKIW
+# da7QGGWZDkthqboc1eC8cIqLjel86qCCIDYwggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -1161,31 +1278,31 @@ while ($listener.IsListening) {
 # IENvZGUgU2lnbmluZyAyMDIxIENBAhAe+8IaP9/TEpwV8IWW2hHsMA0GCWCGSAFl
 # AwQCAQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkD
 # MQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJ
-# KoZIhvcNAQkEMSIEILSib7gdTazSOtcqAWXSkGaOLmbcY15NyleH1/ftZPETMA0G
-# CSqGSIb3DQEBAQUABIIBgFlMnJYTKCAglQ1n9n70h7ykflV/rp/jwBNDLBjsdoFv
-# 9Moi7bzS4dzlGVu2Iqg36YMsDQ+tTrlkNNDFaVBhfGQe5hznQFJfgGCo1hjEFyXG
-# reOhhLWVq4m+bBwAcM6UWAJ7FcmWl2AqYZnIlMfCQ1i831gOk9bK8nwBhAsxXxgR
-# s4xHDtxhREFOP9cu5AsKg603Tvoss93BPsdTtBoxpdIwd5i8AfOozJUZEqIxfaQh
-# 5yEobe6je++lTpNyaCcFdjJltM+Dkk/otdud+cJn+0kQ9XHOKL9CxB7HnfGmqyBe
-# wvcjK4R7rrtcJGAqPsdIC8AVHoFSy1XXAJHJqX7i3tQwuU1Se36oiBq1dJb7AGMd
-# hKR8hm4KL+IHeas05Kjh026e2Z7GRLmud43D8nreXVsA4Qqi8HMcIDLdiWm9QF1p
-# BDsw2qpS5K0teA64dB0d3MivBIdc1nU5B9FQuLg1nZKCLdm9sb347i2QP/2eftZd
-# tHjbY4862FHsbIFKkmQHM6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9
+# KoZIhvcNAQkEMSIEINOnJ2P1A+kb1Hl9mh44Wy6mzOYUI84YfYMFy1pjs0s7MA0G
+# CSqGSIb3DQEBAQUABIIBgLV1pqrfsmsYvi9L8psn2+5SwG7vxsRNDQP8fvFlpSU4
+# 3Dzf5R8aQMEzxm9TwE0kuQMt5BwUI1DBq88BGSACdjQfzajWGPkSwScodesO74HE
+# evIT60EURzOARrLsr50N+W1fmygWQTYzZcpXg5Oy3Zr6P3m00+6IjU8ywyrUIEq1
+# NKu/qMLzNkUzIGJ+XKtiZGfxW1o0gG0rHhhUGrW6+eQG46vGelmoNaR+tvEqjGyt
+# j2kbZzEPFjUh1pvHUf1keEl21Gvbde4Zq97+4g2tO+SsgKnzo3Vu/1rG68lIQhtN
+# b2grWzm7vrCUTe9mzYIp/YUt6ICTzP7+wZJ8ul7OAetsylp30UrOxw7hgjkh72o6
+# VRGUXkit60yZigWd9hSiHQimh/L05/wxs5CDUxBjDIZvwx+Uvfm2pqozREIc4wdX
+# t5zPwTCh9J4pqTMhhId3IlcMeawX85VNMtkV2+9cfK2QUvuKuAi8IBhcjOdf4tNJ
+# kdq8j7hJOVhtnl6qAKsnSqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9
 # MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UE
 # AxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEy
 # NTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAY
-# BgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MTIy
-# MzIyMzZaMC8GCSqGSIb3DQEJBDEiBCDjVbVTXtGd6xw7DaalhBnrM4l5jjg57dQy
-# dcYBaI8J7TANBgkqhkiG9w0BAQEFAASCAgBkEniy5kG8wJOh4wMtPpvurlgX1d1S
-# qgO99BTuuq46Xq4auP+pJQW/yLU9uOKZEnKmAowXb6PqhI0J0wtBAH2FTCbgcVJH
-# lHTPYHc7G5pIzf3ex1T2SeO3Oi8N9wgiTaYJHgg+cVKwWj7bIJfbIBifvesUcZcO
-# DODB695oOqCDaogPVvdLgCT8tiCoJWno5MnTKG9TQSNN5kgH36eaCVAjzeyTbCQB
-# LDjCcdIeBs0xK65e9rYvjLEUUtfJwtoonFPwx7kojp80BkMLfRKUPfLsjBxXiKhy
-# 5R11DuHwBye9EIViH6BpoZkdh19wgzLurXe1wYN3XJmbX9PS3newF+CRdjR5WAS2
-# f2aXSGm0K+0ODGbQ4/XpWX9AprDNIB9R4jKVqhMNl/DVzgE31DzYaJP0CG0L9ofB
-# h4ATl+WmwacHcNyNPd5IJzKYgh+GjIyPEzbhjbxLs3kHNPCH9dWmR+Z/HrmqBOLP
-# LGrMJocaT7K2BCM7ambWXk7agWsye5GElnDeWvT40AJwa6IuZcyGM2W2xrOHnMpw
-# cgLcXA6mRY+GP3BcS5RdB2ohJ+fa8Jmmx6mCCvH9ZTxLM/ylCYX2FR6QVQuxfTf+
-# Anq1tnOmNJjKqxcWKLLgSdZFQNe7HgsSYVvOFq0hFnltTWCL8/cdNdyhOPm6NirY
-# wGKKqBJmUiEhvw==
+# BgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MTMx
+# NDA5MDJaMC8GCSqGSIb3DQEJBDEiBCAYIOK/rFWbkns3k28anp6zsL+UZQ/GyyUk
+# EwYgX3IaHTANBgkqhkiG9w0BAQEFAASCAgAX5lzN1mgM889rVdpz+vzG4G3Mu1cT
+# p9uRM3o5DgGoDsUnownx7N++GsLdwcGwCEe+sT0OrHBbmI68FnuM1u6sowk4e3zk
+# j81qqV8SfsWDXzIAGsxZNS/P3OQzPjOtz1LxtKpF0ZZKWR+pU4NAETI1zMi1caFo
+# Svpz+4RYpkz2wi6N1ZhDZpAgM3Dz4N426pxLPXgnmX8o97x3ZMKAjWS3EmUdyDsY
+# xYN8kNepsnL7EgjCSoiZK27udmNk2aTg4dqG6W9uOg0uSiDKE+bt7VhI2zghZyUM
+# OQGpQU7+Tv8UVExrj/mhxmgukV6dev6jSG8xXhQ+X8Z3CaDBnBM8S+esSr/CtBDF
+# H3Tn75YL04DNuRPKEF7YVOiBL4blvZ85PmnHBE4kunVZcvXfOLhwJWqjEC1bxxsn
+# UehFoJvEg3HCSY7Ck9C2P8/7kL8feQXiT0GBaU6z6JJFHuJV3/mteiazn8DseLgr
+# HXru3vVgVG5wT2zYonzw47aTTnH9qFtkzVkzol9QLGyMGtjLEKYHxgLMviBujqIO
+# Q3CqScW/BCUcYKTGmvDTBgka0OxnkNS1iuALc5HK3PReCLptJAblU1qvBtr0EyN2
+# /AuMYCoXEnHnsjfi/Kz8QKzNF0ih1GmRmeHvkRp+g+Nts9E0dD3Zr8yOsWzhYWIk
+# 2zwL/KfbAeMnRQ==
 # SIG # End signature block

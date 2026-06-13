@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Claude Portal – Free Agent</title>
+<title>Claude Cowork Portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700&family=Rubik:wght@400;500;700&family=Assistant:wght@400;600;700&family=Noto+Sans+Hebrew:wght@400;600&family=Secular+One&display=swap" rel="stylesheet">
@@ -22,7 +22,8 @@
   /* sidebar (left) */
   #sidebar { width:230px; flex:none; direction:rtl; background:var(--panel); border-inline-end:1px solid var(--line);
     display:flex; flex-direction:column; padding:12px 10px; gap:8px; }
-  .brand { color:var(--accent); font-weight:700; font-size:15px; line-height:1.2; padding:2px 4px 8px; }
+  .brand { color:var(--accent); font-weight:700; font-size:15px; line-height:1.2; padding:2px 4px 8px; display:flex; align-items:center; gap:9px; }
+  .brand-logo { flex:none; filter:drop-shadow(0 0 3px rgba(38,201,226,.5)); }
   .brand span { color:var(--muted); font-size:11px; font-weight:400; }
   .side-btn { background:var(--panel2); color:var(--txt); border:1px solid var(--line); border-radius:9px; padding:9px 10px; font-size:13px; cursor:pointer; text-align:right; }
   .side-btn:hover { border-color:var(--accent); }
@@ -208,7 +209,15 @@
 <body>
 <div class="app">
 <aside id="sidebar">
-  <div class="brand">Claude Portal<br><span>Free Agent</span></div>
+  <div class="brand">
+    <svg class="brand-logo" viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
+      <defs><radialGradient id="bl" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#beefff"/><stop offset="45%" stop-color="#26c9e2"/><stop offset="100%" stop-color="#0a2e42"/></radialGradient></defs>
+      <circle cx="16" cy="16" r="13" fill="none" stroke="#26c9e2" stroke-width="3.2"/>
+      <circle cx="16" cy="16" r="10" fill="url(#bl)"/>
+      <g fill="#96ecff"><circle cx="16" cy="2.7" r="1.7"/><circle cx="27.3" cy="10.5" r="1.7"/><circle cx="23" cy="25.8" r="1.7"/><circle cx="9" cy="25.8" r="1.7"/><circle cx="4.7" cy="10.5" r="1.7"/></g>
+    </svg>
+    <div>Claude Cowork Portal<br><span>Free Agent</span></div>
+  </div>
   <button id="newChat" class="side-btn primary">＋ שיחה חדשה</button>
   <button id="addFolder" class="side-btn">📁 הוסף תיקייה</button>
   <div id="folderList" class="folder-list"></div>
@@ -296,6 +305,12 @@
     </div>
 
     <button id="setReset" class="reset-btn">איפוס לברירת מחדל</button>
+
+    <div class="set-section" style="margin-top:14px;border-top:1px solid var(--line);padding-top:14px">
+      <div class="set-label">שרת</div>
+      <button id="shutdownBtn" class="reset-btn" style="color:#c0504d;border-color:#7a3a37">⏻ כבה את שרת הפורטל</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">השרת רץ נסתר ברקע. כיבוי יסגור את הפורטל; להפעלה מחדש — הפעל את Claude Portal מהתפריט.</div>
+    </div>
   </div>
 </div>
 
@@ -987,6 +1002,16 @@ function openSettings(){
   setBg.value = theme.bg || '#1f1e1b';
   buildFontGrid(); buildSwatches();
   settingsEl.style.display = 'flex';
+}
+// ---- stop the (hidden) server from the portal ----
+const shutdownBtn = document.getElementById('shutdownBtn');
+if (shutdownBtn){
+  shutdownBtn.addEventListener('click', async ()=>{
+    if (!confirm('לכבות את שרת הפורטל? הפורטל ייסגר. להפעלה מחדש — הפעל את Claude Portal מהתפריט.')) return;
+    shutdownBtn.disabled = true; shutdownBtn.textContent = 'מכבה…';
+    try { await fetch('/api/shutdown', { method:'POST' }); } catch(e){}
+    document.body.innerHTML = '<div style="color:#9a9389;font-family:sans-serif;text-align:center;margin-top:22vh;direction:rtl;font-size:16px">שרת הפורטל כובה. ✓<br><br>אפשר לסגור את הלשונית.<br>להפעלה מחדש — הפעל את <b>Claude Portal</b> מהתפריט או משולחן העבודה.</div>';
+  });
 }
 document.getElementById('settingsBtn').addEventListener('click', openSettings);
 document.getElementById('settingsClose').addEventListener('click', ()=>settingsEl.style.display='none');
