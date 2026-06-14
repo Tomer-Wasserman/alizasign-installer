@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Stop'
 #  the .ps1's Authenticode signature (pinned to your certificate), then swaps them
 #  in. If GitHub is unreachable the app just continues with the current version.
 # =====================================================
-$script:AppVersion = '1.0.3'
+$script:AppVersion = '1.0.4'
 # Update source: Tomer-Wasserman/alizasign-installer, subfolder 'claude-portal'.
 # Branch-agnostic: we try 'main' first, then 'master', so the default branch name
 # does not matter. The repo must be PUBLIC for raw access without a token.
@@ -27,11 +27,24 @@ $script:UpdateBases = @(
 # whose Subject contains this string (defense against a hijacked repo serving bad code).
 $script:UpdateExpectedSigner = 'Tomer Wasserman'
 
+# Relaunch the portal WITHOUT popping a console window - the same minimized path the
+# installer/shortcut uses (ClaudePortalHidden.vbs -> cmd /c start /min powershell).
+# Used for both the STA bootstrap and the post-update restart. Falls back to a
+# hidden-window powershell if the VBS launcher is missing.
+function Restart-PortalSelf {
+    $vbs = Join-Path $PSScriptRoot 'ClaudePortalHidden.vbs'
+    if (Test-Path $vbs) {
+        Start-Process 'wscript.exe' -ArgumentList ('"' + $vbs + '"')
+    } else {
+        Start-Process 'powershell' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
+    }
+}
+
 # Clipboard + SendKeys require an STA thread. powershell.exe -File is usually STA,
 # but relaunch ourselves under -STA if not, so injection never fails on apartment state.
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     Write-Host "Relaunching under STA..." -ForegroundColor Yellow
-    Start-Process powershell -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"")
+    Restart-PortalSelf
     exit
 }
 
@@ -523,14 +536,26 @@ function Send-Foreground([string]$text, [bool]$submit) {
         if ($el) { try { $el.SetFocus(); Start-Sleep -Milliseconds 90 } catch { } }
         # Inject the text as real Unicode keystrokes. Split on newlines and use
         # Shift+Enter between lines so a multi-line message doesn't submit early.
+        # IMPORTANT: long lines are typed in SMALL CHUNKS with tiny pauses. Sending a
+        # whole long line as one giant SendInput batch makes Cowork/Chromium drop and
+        # REORDER characters (spaces vanish, letters swap) - the "scrambled long text"
+        # bug. Chunking keeps the message queue in order.
         $VK_RETURN = [byte]0x0D
+        $chunk = 6
         $lines = $text -replace "`r`n", "`n" -split "`n"
         for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i].Length -gt 0) { [Win32]::TypeUnicode($lines[$i]) }
+            $ln = $lines[$i]
+            for ($c = 0; $c -lt $ln.Length; $c += $chunk) {
+                $len = [Math]::Min($chunk, $ln.Length - $c)
+                [Win32]::TypeUnicode($ln.Substring($c, $len))
+                Start-Sleep -Milliseconds 8
+            }
             if ($i -lt $lines.Count - 1) { [Win32]::PressKey($VK_RETURN, $true); Start-Sleep -Milliseconds 45 }
         }
         # Let the editor settle so focus is stable before we press Enter to send.
-        Start-Sleep -Milliseconds 350
+        # Scale the wait a little with length so long messages fully commit first.
+        $settle = [Math]::Min(900, 300 + [int]($text.Length * 1.2))
+        Start-Sleep -Milliseconds $settle
         if ($submit) { [Win32]::PressKey($VK_RETURN, $false) }
         Write-Host "  (typed via SendInput; text also on clipboard as backup)" -ForegroundColor DarkGray
         # If Cowork was minimized before, tuck it back so it doesn't linger on a
@@ -809,8 +834,11 @@ function Invoke-UpdateCheck {
             Copy-Item -Path (Join-Path $stage $f.name) -Destination (Join-Path $PSScriptRoot $f.name) -Force
         }
         Write-Host ("  update installed (v" + $mani.version + ") - relaunching...") -ForegroundColor Green
+        # Release this instance's tray icon first so the new instance can claim one
+        # cleanly (a lingering NotifyIcon was the likely cause of the post-update error).
+        try { if ($script:Notify) { $script:Notify.Visible = $false; $script:Notify.Dispose(); $script:Notify = $null } } catch { }
         Start-Sleep -Milliseconds 400
-        Start-Process powershell -ArgumentList @('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"")
+        Restart-PortalSelf   # minimized, no console window (via the VBS launcher)
         return $true
     } catch {
         Write-Host ("  update FAILED - keeping current version. Reason: " + $_.Exception.Message) -ForegroundColor Red
@@ -842,10 +870,10 @@ function Get-SessionMeta($auditDir) {
     if (Test-Path $meta) {
         try {
             $sr = New-Object System.IO.StreamReader($meta, [System.Text.Encoding]::UTF8)
-            $head = New-Object char[] 16384
-            $n = $sr.Read($head, 0, 16384)
+            $head = New-Object char[] 65536
+            $n = $sr.Read($head, 0, 65536)
             $sr.Close()
-            $txt = -join $head[0..($n-1)]
+            $txt = if ($n -gt 0) { -join $head[0..($n-1)] } else { '' }
             foreach ($key in @('title', 'name', 'summary')) {
                 $m = [regex]::Match($txt, '"' + $key + '"\s*:\s*"((?:[^"\\]|\\.)*)"')
                 if ($m.Success -and $m.Groups[1].Value.Trim()) {
@@ -855,8 +883,8 @@ function Get-SessionMeta($auditDir) {
             }
             # Pin/favorite flag - Cowork's exact key isn't documented, so accept any of
             # the common spellings set to a truthy value (best-effort, never throws).
-            if ([regex]::IsMatch($txt, '"(pinned|isPinned|favorite|isFavorite|starred|isStarred)"\s*:\s*true') -or
-                [regex]::IsMatch($txt, '"(pinnedAt|favoritedAt)"\s*:\s*"[^"]+"')) { $pinned = $true }
+            if ([regex]::IsMatch($txt, '"(pinned|isPinned|is_pinned|pin|favorite|isFavorite|is_favorite|favorited|starred|isStarred|bookmarked)"\s*:\s*(true|1)') -or
+                [regex]::IsMatch($txt, '"(pinnedAt|favoritedAt|pinned_at|bookmarkedAt)"\s*:\s*"[^"]+"')) { $pinned = $true }
         } catch { }
     }
     return @{ title = $title; pinned = $pinned }
@@ -1036,6 +1064,31 @@ while ($listener.IsListening) {
         $path = $req.Url.AbsolutePath
         if ($path -notin @('/api/stream','/api/prompt','/api/sessions')) { Write-Host ("  " + $req.HttpMethod + " " + $path) -ForegroundColor DarkGray }
 
+        # --- CSRF / cross-origin guard for state-changing (POST) endpoints ---
+        # The server is reachable by any local process AND by any web page the user
+        # visits (which can fire a "simple" cross-origin POST). Without this, a
+        # malicious page could drive /api/open, /api/send, /api/action, etc.
+        # Same-origin requests from the portal page carry Origin/Referer = our own
+        # localhost URL and Content-Type application/json; everything else is rejected.
+        if ($req.HttpMethod -eq 'POST') {
+            $allowedOrigins = @("http://localhost:$port", "http://127.0.0.1:$port")
+            $origin  = $req.Headers['Origin']
+            $referer = $req.Headers['Referer']
+            $originOk = $false
+            if ($origin) { $originOk = $allowedOrigins -contains $origin.TrimEnd('/') }
+            elseif ($referer) { foreach ($a in $allowedOrigins) { if ($referer.StartsWith($a)) { $originOk = $true; break } } }
+            # Require a non-simple Content-Type (application/json). A cross-site page
+            # cannot send application/json without a preflight, which this no-CORS
+            # server fails - so this also blocks the text/plain simple-request bypass.
+            $ctype = ($req.ContentType + '')
+            $ctypeOk = $ctype -match 'application/json'
+            if (-not ($originOk -and $ctypeOk)) {
+                $resp.StatusCode = 403
+                Send-Text $resp '{"status":"forbidden"}' 'application/json'
+                continue
+            }
+        }
+
         if ($path -eq '/') {
             Send-Bytes $resp ([System.IO.File]::ReadAllBytes($htmlPath)) 'text/html; charset=utf-8'
         }
@@ -1069,25 +1122,48 @@ while ($listener.IsListening) {
                 Send-Text $resp ('{"status":"' + $r + '"}') 'application/json'
             }
         }
-        elseif ($path -eq '/api/open') {
+        elseif ($path -eq '/api/open' -and $req.HttpMethod -eq 'POST') {
             # Open a local file with its default app, or reveal it in File Explorer.
             # Path comes from a file card the portal itself rendered (present_files).
-            $p = $req.QueryString['path']
-            $mode = $req.QueryString['mode']
-            $st = 'bad-path'
+            # Sent as a POST JSON body read as UTF-8 so Hebrew paths survive intact
+            # (HttpListener's QueryString mangles non-ASCII percent-encoding).
+            $reader = New-Object System.IO.StreamReader($req.InputStream, [System.Text.Encoding]::UTF8)
+            $body = $reader.ReadToEnd(); $reader.Close()
+            $p = $null; $mode = 'open'; $st = 'bad-path'; $detail = ''
+            try { $jo = ConvertFrom-Json $body; $p = $jo.path; if ($jo.mode) { $mode = $jo.mode } } catch { }
+            # Refuse to launch dangerous/executable types or network/odd paths even
+            # though the Origin guard already blocks cross-site callers (defense in depth).
+            $dangerExt = @('.exe','.com','.bat','.cmd','.ps1','.psm1','.vbs','.vbe','.js','.jse','.wsf','.wsh','.hta','.scr','.lnk','.msi','.msp','.reg','.cpl','.jar','.pif','.gadget','.inf','.ws')
             if ($p) {
-                try {
-                    if (Test-Path -LiteralPath $p) {
-                        if ($mode -eq 'reveal') {
-                            Start-Process explorer.exe -ArgumentList ('/select,"' + $p + '"')
-                        } else {
-                            Start-Process -FilePath $p
-                        }
-                        $st = 'ok'
-                    } else { $st = 'not-found' }
-                } catch { $st = 'error' }
+                $bad = $false
+                if ($p -match '"') { $bad = $true; $st = 'rejected' }            # quotes can't be in Windows paths
+                elseif ($p -like '\\*' -or $p -like '//*') { $bad = $true; $st = 'rejected' }   # UNC
+                else {
+                    $ext = ''
+                    try { $ext = [System.IO.Path]::GetExtension($p).ToLower() } catch { }
+                    if ($dangerExt -contains $ext) { $bad = $true; $st = 'rejected'; $detail = 'executable type blocked' }
+                }
+                if (-not $bad) {
+                    try {
+                        if (Test-Path -LiteralPath $p) {
+                            if ($mode -eq 'reveal') {
+                                # pass /select and the quoted path as separate arguments (no string injection)
+                                Start-Process -FilePath 'explorer.exe' -ArgumentList @('/select,', ('"' + $p + '"')) | Out-Null
+                            } else {
+                                $psi = New-Object System.Diagnostics.ProcessStartInfo
+                                $psi.FileName = $p; $psi.UseShellExecute = $true
+                                [Diagnostics.Process]::Start($psi) | Out-Null
+                            }
+                            $st = 'ok'
+                        } else { $st = 'not-found'; $detail = $p }
+                    } catch { $st = 'error'; $detail = $_.Exception.Message }
+                }
             }
-            Send-Text $resp ('{"status":"' + $st + '"}') 'application/json'
+            $payload = @{ status = $st; detail = $detail } | ConvertTo-Json -Compress
+            Send-Text $resp $payload 'application/json'
+        }
+        elseif ($path -eq '/api/version') {
+            Send-Text $resp ('{"version":"' + $script:AppVersion + '"}') 'application/json'
         }
         elseif ($path -eq '/api/prompt') {
             Send-Text $resp ($script:PromptCache['json']) 'application/json'
@@ -1101,12 +1177,13 @@ while ($listener.IsListening) {
                 $text = $j.text
                 if ($null -ne $j.submit) { $submit = [bool]$j.submit }
                 if ($j.files) {
+                    $total = 0
                     foreach ($f in $j.files) {
-                        $files += [pscustomobject]@{
-                            b64  = ($f.data -replace '^data:[^,]+,', '')   # strip data-URL prefix
-                            name = $f.name
-                            type = $f.type
-                        }
+                        if ($files.Count -ge 20) { break }                       # cap: max 20 files
+                        $b = ($f.data -replace '^data:[^,]+,', '')
+                        $total += $b.Length
+                        if ($total -gt 80MB) { break }                           # cap: ~60MB decoded total
+                        $files += [pscustomobject]@{ b64 = $b; name = $f.name; type = $f.type }
                     }
                 }
             } catch { }
@@ -1154,12 +1231,12 @@ while ($listener.IsListening) {
     }
 }
 if ($script:Notify) { try { $script:Notify.Visible = $false; $script:Notify.Dispose() } catch { } }
-# (end of script - this trailing comment shields the code from signature-block ed
+# (end of script - this trailing comment shields the code from signature-block e
 # SIG # Begin signature block
 # MIImpgYJKoZIhvcNAQcCoIImlzCCJpMCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDtI4dDiAZ5LJFc
-# AKB6eapxkWepuoEhL3AbGrC3LZ3O86CCIDYwggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDWvEs/z9NSoBEJ
+# qTIC3Z8tC+x9DNGUuyirNXCd9ZPt5KCCIDYwggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -1336,31 +1413,31 @@ if ($script:Notify) { try { $script:Notify.Visible = $false; $script:Notify.Disp
 # IENvZGUgU2lnbmluZyAyMDIxIENBAhAe+8IaP9/TEpwV8IWW2hHsMA0GCWCGSAFl
 # AwQCAQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkD
 # MQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJ
-# KoZIhvcNAQkEMSIEIGiBWUwx0DUhKSQo4x9dRvn7uvH6Jd81QMqkj09vYtHPMA0G
-# CSqGSIb3DQEBAQUABIIBgD7hbw3d1IgM3p0jeBwQDLaM8HKIXHxaThIIz4heb7P7
-# vmOf8raRw+uvDPC5MIIFBTEEk6Fq3cmWTfzZ6Gt8l6ELzXjLnEgKZfSuYcvumtlz
-# dOfUprdwN0hcukEdgTXSXyGjXicCvZHtekev3PkT2aEwSjgMe85qwGPpTp4eSbIS
-# k5LEn4HjoFwadRhRJFdfjPRupRnlDjs/vmpcI7hzPSYPqh9SYZXSBhp/byeI1hNC
-# WAhf7k5gaEyda5l0G6sOpvEa30Xzq+Ep0JuCcZWodvH/voUN/u4gfq1jsqxUAb5p
-# RFDYJK4O+w10CLoD0wCDSRlXy9+PvVg4cZfiWB4+gcXyq/+mqT9fpAB3tbRY55CC
-# lcF81nZ2gEP0jIxF8lVZKpXmyFZeITaINgb8hkXqpfFQwBKC7E26rUiWhMQ5nn5Y
-# jNPkEr0kSxRkHKwjAGOsgjQE5jcGKa8DOA6GEvjrg4wO1LuSkg9Eo0sKMtWnWrra
-# zsbdfiu15R4OHQ/GTcz/KKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9
+# KoZIhvcNAQkEMSIEIFd8rERbri8GP8kgBkcos1VaUPUoBD10mc3x+GLSAJxcMA0G
+# CSqGSIb3DQEBAQUABIIBgJcc+Z4+NzLP1eh4AV1x1dWBWbPTBn90A2yIvOD3AC3f
+# REYJzFHzPPQ6sFRW8eea2WWsOb3x2sFQCPQQ56BlijEyKYP7grNj3zAAfk+RrFAZ
+# dgHQ2rlvjtgEcaQ3BnrijhwH9n/lDptrPgFw9MwOulso3zy5PEL7clEBPhmMuaWt
+# Vx2k/3QWtIcr82OMyJud92tOORVUeUU1bHtz8CKmb4wn9QQHPngHimmtCD9khOjf
+# Syllc59A7eBiSSTYpXqIFEcakyqyXSFmez3YknzMHJnp9AC+JN5GMVLL31c271nH
+# lRP2txOhJovxDIvE5eGf5TD3JouhWYN95j5ECPYO5f5+6xtxEAu5/vvmk/9ic73y
+# Xxmcw4eDpB+INcD7aWCdwqrUoD8DzREy18IS7nnVMKyyqsI6rhsdQLUALyMvcyGk
+# AmpsNyhjgR61I1eLUnO7vqkYaba3lTNvRlJuYmQWRTCawgMcPg0Gbhc603zWawmN
+# zrMUXpvYqSCRZmhKViO+BKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9
 # MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UE
 # AxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEy
 # NTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAY
 # BgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MTQy
-# MDA0MzJaMC8GCSqGSIb3DQEJBDEiBCAgoiX2N98VYk1oO8DWNh71lVUkgUf4x4rm
-# WU4ox6trRTANBgkqhkiG9w0BAQEFAASCAgAwjlTh1hl/KrflVoCdWDTUCs10puBd
-# fb8XXq17u7IKGCbUzKzqlkeTiohGCcXZ4FFEaTONffkZOtI3q/yiAEB8t5CZFIAR
-# fW73MyS5mtP+SwxoZx/iW8iACdthzC7FhGWED5ZbhZrBnpYL8w5gfyEvIK1yUSDk
-# E8amcB0Mk3Nkf4EI/l5vbk6RJy/KpcDbrgG3QTedWnuhMiuBZoV0A6SopankLeGQ
-# ZQTZOO242Dsh64lJl4CuQ+06wXlvSsUprdVHj44NeaVVJJ+kGXvq7o+Z6mp4P2qg
-# meyTcev2cWc4+/ItOIb4Y0wwaA8gqIfz2AAJ6M1WT/4pdhWlJeRJG+vb6ON5rsyc
-# PLR0KaX5mKt6dWFSV0wMljB7gPnIRE42FhDCbPf6xxYzplDuD0kTmw7nvnvHLlKO
-# v06Ds0vcJllLqQ8TEPnx8+HrJlily2UyS+hWopXAUHVm9fK4vMmXS3sXb1Tq8fs0
-# 3P+t9QI3JVwPTKe26NlmizeabHW/AqExt0hTfWfP97yvu83y0XMQbig4HRRy65A+
-# E6Zh9n0ZbfWvp9NidGjBOR7g84JJ38NwQ45p9bwqbPl5A7wCLfRpevCxxLH008wH
-# feK2MMF/rmmoq2ioRYRMIDQHM9C3LEnY7zfE6qJNqHC5FXdno4OFo4U7kvWjN+IZ
-# VN1Vqi4Z26nTOA==
+# MDU5NDNaMC8GCSqGSIb3DQEJBDEiBCAknYEFpl/NbxwLja59rl3XUP/ePjh+GeAM
+# f9XJqr3JHjANBgkqhkiG9w0BAQEFAASCAgBGWSs7KO7bGUMZB0Px7OlfZo01KuQy
+# 3bFJj0m61BJ/AD5+Sb39YsTzTJ1bN9ILxr7C7djxJNHs+X/j5kZ9NTdJOU2DYGuN
+# BXi/SDDMBvv+J1NeCh9spUnV2E4kBAlykuHU4RHjfcDShNDSMjzZbJeqRzsZAebC
+# RalU0rGzjG452zbbxDOgA5QS3HfaRtZQIbn4IA2DdR2m8r3B+I5s/R8ZVKLd5qYe
+# fumjPYrLQdK5HFJ0rPq/oVJ3DzpWSYAMdr+o8ojLlMmmrs15rELXEuykoUgPbTEb
+# LizFA51HQkLUohk1FU+9v2smB74nLma2In7dEiXzkbAvy9yIEjKzNgiDhbAmYiBp
+# Z27H3drDgLaGfoO7ePpfGg5aF7niQQ9esUNLi4fQBCjyq7kDcKZxdqS0dDERXHnK
+# QAwnn5SDlfLdKlmGsKBq0BvUYFu23NxQhUufQsDyQNu6/puDMspo4wCtusbeJ5/I
+# jiDQBSEJLM4ZIYYdQVKg8BC1VVkkj4tjktV473Kl+9A3/unknZG4/eOMvtzS8BJT
+# IErFVYWjKCIg7J/AGhEU97Pu4Qo17knn7IcJ5eL1s1iYwXKW187vTVNpSEVtq9P2
+# YHdnmehBdadNupLwAJMoxr3gmOCohQGxCXazdVVnNVc/9JluFiby8LDN41TpPFXq
+# FtlNsnQG/n1diQ==
 # SIG # End signature block
