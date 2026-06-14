@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Stop'
 #  the .ps1's Authenticode signature (pinned to your certificate), then swaps them
 #  in. If GitHub is unreachable the app just continues with the current version.
 # =====================================================
-$script:AppVersion = '1.0.1'
+$script:AppVersion = '1.0.2'
 # Update source: Tomer-Wasserman/alizasign-installer, subfolder 'claude-portal'.
 # Branch-agnostic: we try 'main' first, then 'master', so the default branch name
 # does not matter. The repo must be PUBLIC for raw access without a token.
@@ -761,8 +761,16 @@ function Invoke-UpdateCheck {
     foreach ($b in $script:UpdateBases) {
         if ($b -match 'OWNER/REPO') { continue }
         try {
-            $mani = Invoke-RestMethod -Uri ($b + '/version.json') -TimeoutSec 5 -ErrorAction Stop
-            if ($mani -and $mani.version) { $base = $b; break }
+            # Fetch as raw text and parse explicitly. raw.githubusercontent serves
+            # version.json as text/plain (so Invoke-RestMethod would NOT auto-parse it),
+            # and the file may carry a UTF-8 BOM that PowerShell 5.1's ConvertFrom-Json
+            # rejects - so we strip the BOM before parsing.
+            $resp = Invoke-WebRequest -Uri ($b + '/version.json') -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+            $txt = $resp.Content
+            if ($txt -is [byte[]]) { $txt = [System.Text.Encoding]::UTF8.GetString($txt) }
+            $txt = ([string]$txt).TrimStart([char]0xFEFF, [char]0xFFFE)
+            $m = $txt | ConvertFrom-Json
+            if ($m -and $m.version) { $mani = $m; $base = $b; break }
         } catch { }
     }
     if (-not $base -or -not $mani -or -not $mani.version) {
@@ -1126,12 +1134,12 @@ while ($listener.IsListening) {
     }
 }
 if ($script:Notify) { try { $script:Notify.Visible = $false; $script:Notify.Dispose() } catch { } }
-# (end of script - this trailing comment shields the code from signature-block edit
+# (end of script - this trailing comment shields the code from signature-block edi
 # SIG # Begin signature block
 # MIImpgYJKoZIhvcNAQcCoIImlzCCJpMCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCwvO90joIohykS
-# CT895AI2qapGFgitwXlt3RtYNRHh0KCCIDYwggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAK1kmEsWNtQvee
+# Zqym2vNFFv6oA3Re0SDrS1wvtEBHG6CCIDYwggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -1308,31 +1316,31 @@ if ($script:Notify) { try { $script:Notify.Visible = $false; $script:Notify.Disp
 # IENvZGUgU2lnbmluZyAyMDIxIENBAhAe+8IaP9/TEpwV8IWW2hHsMA0GCWCGSAFl
 # AwQCAQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkD
 # MQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJ
-# KoZIhvcNAQkEMSIEINDb7kFwkMelCg+VE1HeqP5BNuJbHTpXHuRtymL7aQX1MA0G
-# CSqGSIb3DQEBAQUABIIBgAlGX1pS5l0LxAJ0j4rq6BoKB0OMDw/IrgPagucdp0M6
-# iK1VUNfl7f8TFJg9iWw1Zx+Ov0hNI4EVJunVo80vIMJg0u5GiiHjllecurRg8T7w
-# N+eXvFu4xyMmcjBfvaQiTQRBRtJDfQe8SngQESZEw3pln7oHGNQA4pO7RJoHxtZT
-# Bse7RHR9Up6vSFQDtDZWF7L9eXx7b/oBQnUzSVTgTVJ8OhL0MGNYC903P52bABii
-# EZIzbYpoR8Il5G/flMGtaaPI2LAw9k7CNh4phhvf0lRNK5/fxHZowUGFGT/yIZf+
-# X6Yzb4HoLYya/0G+1dYKV1zbgsn6sW6a/ecdCbowJ3h6b8kZvrd+beIcU+GV34vh
-# aI0FylTPJT2HXY4MkoNNpsjCBm81rRZBU2AF2ew0HO9dBwIiISyaBfuAvNCSf+yN
-# 8/xGSp4O4aw5+2Ee0bUP4bzoU1xWJGjfgIsv9sAfLAJ49rnrU4v930oJBelw4vH8
-# tybKLgTgov+/167hO5eWRKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9
+# KoZIhvcNAQkEMSIEIFiaBjC3ncI1YFPPP+b26+4S1PwqRS2Lazi7sxtQ3B3AMA0G
+# CSqGSIb3DQEBAQUABIIBgH6aOQiWBUmAPT6J7+G5jQ8CIRMqUWxI3mWvP6GXsqRA
+# Q0zf3IElz/DeAQCKS3DjfhXokK5KHZfL1T5zhAWBk+t24KgoMw6gmCvUXbq+SDn4
+# ZYqj+0gmREjSiJTgPYo1S49nVYirmT3dXy3jK94Ag3QmGLAsSxA7687WRGNMLlTE
+# n2lGpqPj47mz2KTgVpf3A0UjcVZpTEiv+lXAlC6kybjwd3WnWdCWcxL/orlRU2qo
+# CaLMQ1c2WO0FcT2XxfVSPj6zTue+R6WLSkQbQnRHWrpytegYyKzAHlKZno7lkRz8
+# Vf3W4BzQprHJ7exGgKZAE4TEXIL8m5f9+Rtbhgnydtj0qoY668YoXoE8PBcyj3Mw
+# N76jOOFn3elm1MWqcHMnmJA/UnUtZ3cqdYK73wzL1hN6ZLC1FkLLNNTkDZhRnZph
+# TBERhlebyBo2xyCuiXZTEQz+PYgjDGzmjZhd/QJCS5QJRpMcfrFjzLXfhA1nxvnq
+# QauWVBDL4UBpnppDWIdHRKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9
 # MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UE
 # AxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEy
 # NTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAY
 # BgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MTQx
-# NzMxNTVaMC8GCSqGSIb3DQEJBDEiBCBoee6oV3vu0O2hEI1jdo7JGr3Ag5IhvEQ0
-# qNXDE24NyTANBgkqhkiG9w0BAQEFAASCAgAgG9/yleU2Z2wWRiTRslW68jUMAGp4
-# 8z/4hgFcmKlVk5PsmojvJm9/ZE4HMxzuBq8au4KenCLdNdnkdp89/HbQSqDx3LqO
-# zykH+L4l/q0B3AVx4431GFoQgRP44iV/oIMI1LQQmJ/eGZnU3qWJPJevkTXmcwAw
-# ClxoUCp5YX81eLn9ds81t5BJcAVmVtR7nqYI9VqLgQumSIx1V5WQr7O7oN3vP5Qj
-# iF9MaVAiYKsNWtCyLmzAYx0OinAk1d5Ve0bp5/falcHkXnvSpiiRe8yCaDI/jw1r
-# hA1B/iQlOA2d0jZmAP4QzDKlZmPDrGR0CTT837w4zk0X2BtYCISGOsFtBtiryYif
-# LY1OynxyUnYrnNQcltweydm6U1NzWwx6KulC4vnJ5XB/cY7BmjZnuCOEJ98/RQ+D
-# AgoWDWXxnpo9KHgLWfG74pmUib8xfi4Wdfdn+FQ2oBoJdssq8620jClr2d6pTZjH
-# i8eLVURJ6Ntj+W5YijVRukxB2+RWsNK2gAM8D+qFtJNWYmqLTmD/D+EOxs5ynuiV
-# W7yb4Y5w/IgwsiR/9ODz4jkfncz8iJytc1sjZc9SeA3k9KI6zNasIe2dJMpRDuw9
-# PmwRdM55dCkTRq/1HO1vE7qyYoIV8LQxmrtoFTvbrqx+sAgRFgMgMInmB7n9WFtI
-# dLM8CiFsJoMl+g==
+# ODA1MzJaMC8GCSqGSIb3DQEJBDEiBCBJLPLZNUj7DYu+eb55Qvi3EJvLf4DUkoRQ
+# cVbb/dI23zANBgkqhkiG9w0BAQEFAASCAgBvsnPD4mpfLVeeABbZmaQnG71t/CZQ
+# luCxeWrvtGNkOfbNzg53SWesG8QUSeMVR/9FVGQgVnBA5B+nLaLN25kMqiKGAVWP
+# RANYTSUW+vGtzeDgKHrglIiWvchFYznoJZODDDnkedqpMoAQ6ze8SGKFVG71V7XD
+# 14K59mvEtImnmtIi/YEdqO4N/CKgP4QpizHxJDVXcfJSzRWcw2DNw9SVgD6OgL99
+# GgxE5E4A8Yg4LVAvPNMKTs/4rk9Hqd6mv2JTjflGDKa0RMLsA/8/5CTVI0T/FLcb
+# GxUqaqy2lasY0gSLbJm1VGNqksO9GpJezYseA+d6cRXYN4hL/7fR5+TZgWhySSNC
+# TBpS+7SCbMo5JllzH7DRlcsJpPZpTlkxdj6162xvxqQc0Y9bT4ldQbB9xhUyxl34
+# pLxhnAfjseFtYK3q3SVq+kzbfuBUTc+2h8hpWGwbF/ZZqqYB4vquSUmEZiJm8Pzm
+# Je26h03sPJT5TN2+AWI4xB8VDObrAEKC7EDzMTG6tP2yUs9KbnHFYHPf8jnnpycf
+# dPwVf02odnSPKPmN8kujJSjB87yvMf27mtKUwvTnDupb9YsBAq4ZaVCSlJw36wlJ
+# ZdWUdug1AssEOowUodyz+zbjlMnP8WFRUnbi9ODJOQIaCYnwiD/HV4P/jPQ/epeR
+# hPihoLbejdQnwg==
 # SIG # End signature block
