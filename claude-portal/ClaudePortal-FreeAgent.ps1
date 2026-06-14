@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Stop'
 #  the .ps1's Authenticode signature (pinned to your certificate), then swaps them
 #  in. If GitHub is unreachable the app just continues with the current version.
 # =====================================================
-$script:AppVersion = '1.0.0'
+$script:AppVersion = '1.0.1'
 # Update source: Tomer-Wasserman/alizasign-installer, subfolder 'claude-portal'.
 # Branch-agnostic: we try 'main' first, then 'master', so the default branch name
 # does not matter. The repo must be PUBLIC for raw access without a token.
@@ -479,6 +479,11 @@ function Send-Foreground([string]$text, [bool]$submit) {
         # NOTE: we deliberately do NOT touch the clipboard here - the text is TYPED,
         # so there is no need to overwrite the user's clipboard / Win+V history.
         $hwnd = $proc.MainWindowHandle
+        # Remember if Cowork was minimized/hidden before we pulled it forward. On a
+        # multi-monitor setup just restoring focus to the portal leaves Cowork sitting
+        # visible on the other screen, so if it started minimized we re-minimize it.
+        $wasIconic = $false
+        try { $wasIconic = [Win32]::IsIconic($hwnd) } catch { }
         [Win32]::ForceForeground($hwnd) | Out-Null
         Start-Sleep -Milliseconds 300
         # Retry once if Windows still hasn't handed over focus
@@ -510,18 +515,28 @@ function Send-Foreground([string]$text, [bool]$submit) {
             $method = 'click-fallback (UIA empty)'
         }
         Write-Host ("  composer focus: " + $method) -ForegroundColor DarkGray
-        Start-Sleep -Milliseconds 200
+        # Give the composer extra time to gain focus before typing. A too-short
+        # settle is the main cause of the random "only half the message typed"
+        # bug: the first keystrokes fire while the editor is still focusing and
+        # React drops them. Settle, then re-assert focus right before typing.
+        Start-Sleep -Milliseconds 380
+        if ($el) { try { $el.SetFocus(); Start-Sleep -Milliseconds 90 } catch { } }
         # Inject the text as real Unicode keystrokes. Split on newlines and use
         # Shift+Enter between lines so a multi-line message doesn't submit early.
         $VK_RETURN = [byte]0x0D
         $lines = $text -replace "`r`n", "`n" -split "`n"
         for ($i = 0; $i -lt $lines.Count; $i++) {
             if ($lines[$i].Length -gt 0) { [Win32]::TypeUnicode($lines[$i]) }
-            if ($i -lt $lines.Count - 1) { [Win32]::PressKey($VK_RETURN, $true); Start-Sleep -Milliseconds 30 }
+            if ($i -lt $lines.Count - 1) { [Win32]::PressKey($VK_RETURN, $true); Start-Sleep -Milliseconds 45 }
         }
-        Start-Sleep -Milliseconds 250
+        # Let the editor settle so focus is stable before we press Enter to send.
+        Start-Sleep -Milliseconds 350
         if ($submit) { [Win32]::PressKey($VK_RETURN, $false) }
         Write-Host "  (typed via SendInput; text also on clipboard as backup)" -ForegroundColor DarkGray
+        # If Cowork was minimized before, tuck it back so it doesn't linger on a
+        # second monitor. SW_MINIMIZE (6) also hands activation to the window behind
+        # it (the portal); the dispatcher then re-asserts portal focus.
+        if ($wasIconic) { Start-Sleep -Milliseconds 120; try { [Win32]::ShowWindow($hwnd, 6) | Out-Null } catch { } }
         return 'ok'
     } catch {
         Write-Host ("  send error: " + $_.Exception.Message) -ForegroundColor Red
@@ -572,6 +587,9 @@ function Send-Background([string]$text, [bool]$submit, $files) {
         $proc = Find-ClaudeWindow
         if (-not $proc) { return 'window-not-found' }
         $hwnd = $proc.MainWindowHandle
+        # If Cowork started minimized, re-minimize it after sending (multi-monitor fix).
+        $wasIconic = $false
+        try { $wasIconic = [Win32]::IsIconic($hwnd) } catch { }
 
         # --- File attachment path (screenshots / PDFs / any files, one or many) ---
         # Attaching needs to paste into the composer, which requires foreground focus.
@@ -624,6 +642,7 @@ function Send-Background([string]$text, [bool]$submit, $files) {
             }
             if ($submit) { [Win32]::PressKey([byte]0x0D, $false) }
             Start-Sleep -Milliseconds 120
+            if ($wasIconic) { try { [Win32]::ShowWindow($hwnd, 6) | Out-Null } catch { } }
             if ($prevFg -ne [IntPtr]::Zero -and $prevFg -ne $hwnd -and [Win32]::GetForegroundWindow() -ne $prevFg) {
                 [Win32]::ForceForegroundKeep($prevFg) | Out-Null
             }
@@ -695,6 +714,7 @@ function Send-Background([string]$text, [bool]$submit, $files) {
         # 3) Return focus to the portal/browser so Claude doesn't stay in front.
         #    Use the state-preserving variant so a maximized portal stays maximized.
         Start-Sleep -Milliseconds 120
+        if ($wasIconic) { try { [Win32]::ShowWindow($hwnd, 6) | Out-Null } catch { } }
         if ($prevFg -ne [IntPtr]::Zero -and $prevFg -ne $hwnd -and [Win32]::GetForegroundWindow() -ne $prevFg) {
             [Win32]::ForceForegroundKeep($prevFg) | Out-Null
             Write-Host "  focus returned to portal" -ForegroundColor DarkGray
@@ -805,8 +825,11 @@ if (Test-Path $tmpAtt) {
 $script:SessionMap = @{}
 $script:LastButtons = @()
 
-function Get-SessionTitle($auditDir) {
-    # Sibling metadata file: <parent>\<dirname>.json
+function Get-SessionMeta($auditDir) {
+    # Reads the sibling metadata file <parent>\<dirname>.json once and returns both
+    # the human title and whether the conversation is pinned/favorited in Cowork.
+    $title = (Split-Path $auditDir -Leaf)
+    $pinned = $false
     $meta = Join-Path (Split-Path $auditDir -Parent) ((Split-Path $auditDir -Leaf) + '.json')
     if (Test-Path $meta) {
         try {
@@ -818,12 +841,17 @@ function Get-SessionTitle($auditDir) {
             foreach ($key in @('title', 'name', 'summary')) {
                 $m = [regex]::Match($txt, '"' + $key + '"\s*:\s*"((?:[^"\\]|\\.)*)"')
                 if ($m.Success -and $m.Groups[1].Value.Trim()) {
-                    try { return (ConvertFrom-Json ('{"t":"' + $m.Groups[1].Value + '"}')).t } catch { return $m.Groups[1].Value }
+                    try { $title = (ConvertFrom-Json ('{"t":"' + $m.Groups[1].Value + '"}')).t } catch { $title = $m.Groups[1].Value }
+                    break
                 }
             }
+            # Pin/favorite flag - Cowork's exact key isn't documented, so accept any of
+            # the common spellings set to a truthy value (best-effort, never throws).
+            if ([regex]::IsMatch($txt, '"(pinned|isPinned|favorite|isFavorite|starred|isStarred)"\s*:\s*true') -or
+                [regex]::IsMatch($txt, '"(pinnedAt|favoritedAt)"\s*:\s*"[^"]+"')) { $pinned = $true }
         } catch { }
     }
-    return (Split-Path $auditDir -Leaf)
+    return @{ title = $title; pinned = $pinned }
 }
 
 $script:SessCache = $null
@@ -839,9 +867,11 @@ function Get-SessionsJson {
         $dir = Split-Path $a.FullName -Parent
         $id = Split-Path $dir -Leaf
         $script:SessionMap[$id] = $a.FullName
+        $sm = Get-SessionMeta $dir
         $list += [pscustomobject]@{
             id        = $id
-            title     = Get-SessionTitle $dir
+            title     = $sm.title
+            pinned    = [bool]$sm.pinned
             lastWrite = $a.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
             size      = $a.Length
             active    = (($now - $a.LastWriteTime).TotalSeconds -lt 90)
@@ -1096,12 +1126,12 @@ while ($listener.IsListening) {
     }
 }
 if ($script:Notify) { try { $script:Notify.Visible = $false; $script:Notify.Dispose() } catch { } }
-# (end of script - this trailing comment shields the code from signature-block edits
+# (end of script - this trailing comment shields the code from signature-block edit
 # SIG # Begin signature block
 # MIImpgYJKoZIhvcNAQcCoIImlzCCJpMCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYsVsGLKutKKIW
-# da7QGGWZDkthqboc1eC8cIqLjel86qCCIDYwggWNMIIEdaADAgECAhAOmxiO+dAt
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCwvO90joIohykS
+# CT895AI2qapGFgitwXlt3RtYNRHh0KCCIDYwggWNMIIEdaADAgECAhAOmxiO+dAt
 # 5+/bUOIIQBhaMA0GCSqGSIb3DQEBDAUAMGUxCzAJBgNVBAYTAlVTMRUwEwYDVQQK
 # EwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xJDAiBgNV
 # BAMTG0RpZ2lDZXJ0IEFzc3VyZWQgSUQgUm9vdCBDQTAeFw0yMjA4MDEwMDAwMDBa
@@ -1278,31 +1308,31 @@ if ($script:Notify) { try { $script:Notify.Visible = $false; $script:Notify.Disp
 # IENvZGUgU2lnbmluZyAyMDIxIENBAhAe+8IaP9/TEpwV8IWW2hHsMA0GCWCGSAFl
 # AwQCAQUAoIGEMBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkD
 # MQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJ
-# KoZIhvcNAQkEMSIEINOnJ2P1A+kb1Hl9mh44Wy6mzOYUI84YfYMFy1pjs0s7MA0G
-# CSqGSIb3DQEBAQUABIIBgLV1pqrfsmsYvi9L8psn2+5SwG7vxsRNDQP8fvFlpSU4
-# 3Dzf5R8aQMEzxm9TwE0kuQMt5BwUI1DBq88BGSACdjQfzajWGPkSwScodesO74HE
-# evIT60EURzOARrLsr50N+W1fmygWQTYzZcpXg5Oy3Zr6P3m00+6IjU8ywyrUIEq1
-# NKu/qMLzNkUzIGJ+XKtiZGfxW1o0gG0rHhhUGrW6+eQG46vGelmoNaR+tvEqjGyt
-# j2kbZzEPFjUh1pvHUf1keEl21Gvbde4Zq97+4g2tO+SsgKnzo3Vu/1rG68lIQhtN
-# b2grWzm7vrCUTe9mzYIp/YUt6ICTzP7+wZJ8ul7OAetsylp30UrOxw7hgjkh72o6
-# VRGUXkit60yZigWd9hSiHQimh/L05/wxs5CDUxBjDIZvwx+Uvfm2pqozREIc4wdX
-# t5zPwTCh9J4pqTMhhId3IlcMeawX85VNMtkV2+9cfK2QUvuKuAi8IBhcjOdf4tNJ
-# kdq8j7hJOVhtnl6qAKsnSqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9
+# KoZIhvcNAQkEMSIEINDb7kFwkMelCg+VE1HeqP5BNuJbHTpXHuRtymL7aQX1MA0G
+# CSqGSIb3DQEBAQUABIIBgAlGX1pS5l0LxAJ0j4rq6BoKB0OMDw/IrgPagucdp0M6
+# iK1VUNfl7f8TFJg9iWw1Zx+Ov0hNI4EVJunVo80vIMJg0u5GiiHjllecurRg8T7w
+# N+eXvFu4xyMmcjBfvaQiTQRBRtJDfQe8SngQESZEw3pln7oHGNQA4pO7RJoHxtZT
+# Bse7RHR9Up6vSFQDtDZWF7L9eXx7b/oBQnUzSVTgTVJ8OhL0MGNYC903P52bABii
+# EZIzbYpoR8Il5G/flMGtaaPI2LAw9k7CNh4phhvf0lRNK5/fxHZowUGFGT/yIZf+
+# X6Yzb4HoLYya/0G+1dYKV1zbgsn6sW6a/ecdCbowJ3h6b8kZvrd+beIcU+GV34vh
+# aI0FylTPJT2HXY4MkoNNpsjCBm81rRZBU2AF2ew0HO9dBwIiISyaBfuAvNCSf+yN
+# 8/xGSp4O4aw5+2Ee0bUP4bzoU1xWJGjfgIsv9sAfLAJ49rnrU4v930oJBelw4vH8
+# tybKLgTgov+/167hO5eWRKGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9
 # MGkxCzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UE
 # AxM4RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEy
 # NTYgMjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAY
-# BgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MTMx
-# NDA5MDJaMC8GCSqGSIb3DQEJBDEiBCAYIOK/rFWbkns3k28anp6zsL+UZQ/GyyUk
-# EwYgX3IaHTANBgkqhkiG9w0BAQEFAASCAgAX5lzN1mgM889rVdpz+vzG4G3Mu1cT
-# p9uRM3o5DgGoDsUnownx7N++GsLdwcGwCEe+sT0OrHBbmI68FnuM1u6sowk4e3zk
-# j81qqV8SfsWDXzIAGsxZNS/P3OQzPjOtz1LxtKpF0ZZKWR+pU4NAETI1zMi1caFo
-# Svpz+4RYpkz2wi6N1ZhDZpAgM3Dz4N426pxLPXgnmX8o97x3ZMKAjWS3EmUdyDsY
-# xYN8kNepsnL7EgjCSoiZK27udmNk2aTg4dqG6W9uOg0uSiDKE+bt7VhI2zghZyUM
-# OQGpQU7+Tv8UVExrj/mhxmgukV6dev6jSG8xXhQ+X8Z3CaDBnBM8S+esSr/CtBDF
-# H3Tn75YL04DNuRPKEF7YVOiBL4blvZ85PmnHBE4kunVZcvXfOLhwJWqjEC1bxxsn
-# UehFoJvEg3HCSY7Ck9C2P8/7kL8feQXiT0GBaU6z6JJFHuJV3/mteiazn8DseLgr
-# HXru3vVgVG5wT2zYonzw47aTTnH9qFtkzVkzol9QLGyMGtjLEKYHxgLMviBujqIO
-# Q3CqScW/BCUcYKTGmvDTBgka0OxnkNS1iuALc5HK3PReCLptJAblU1qvBtr0EyN2
-# /AuMYCoXEnHnsjfi/Kz8QKzNF0ih1GmRmeHvkRp+g+Nts9E0dD3Zr8yOsWzhYWIk
-# 2zwL/KfbAeMnRQ==
+# BgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MTQx
+# NzMxNTVaMC8GCSqGSIb3DQEJBDEiBCBoee6oV3vu0O2hEI1jdo7JGr3Ag5IhvEQ0
+# qNXDE24NyTANBgkqhkiG9w0BAQEFAASCAgAgG9/yleU2Z2wWRiTRslW68jUMAGp4
+# 8z/4hgFcmKlVk5PsmojvJm9/ZE4HMxzuBq8au4KenCLdNdnkdp89/HbQSqDx3LqO
+# zykH+L4l/q0B3AVx4431GFoQgRP44iV/oIMI1LQQmJ/eGZnU3qWJPJevkTXmcwAw
+# ClxoUCp5YX81eLn9ds81t5BJcAVmVtR7nqYI9VqLgQumSIx1V5WQr7O7oN3vP5Qj
+# iF9MaVAiYKsNWtCyLmzAYx0OinAk1d5Ve0bp5/falcHkXnvSpiiRe8yCaDI/jw1r
+# hA1B/iQlOA2d0jZmAP4QzDKlZmPDrGR0CTT837w4zk0X2BtYCISGOsFtBtiryYif
+# LY1OynxyUnYrnNQcltweydm6U1NzWwx6KulC4vnJ5XB/cY7BmjZnuCOEJ98/RQ+D
+# AgoWDWXxnpo9KHgLWfG74pmUib8xfi4Wdfdn+FQ2oBoJdssq8620jClr2d6pTZjH
+# i8eLVURJ6Ntj+W5YijVRukxB2+RWsNK2gAM8D+qFtJNWYmqLTmD/D+EOxs5ynuiV
+# W7yb4Y5w/IgwsiR/9ODz4jkfncz8iJytc1sjZc9SeA3k9KI6zNasIe2dJMpRDuw9
+# PmwRdM55dCkTRq/1HO1vE7qyYoIV8LQxmrtoFTvbrqx+sAgRFgMgMInmB7n9WFtI
+# dLM8CiFsJoMl+g==
 # SIG # End signature block

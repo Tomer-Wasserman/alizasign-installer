@@ -1,15 +1,15 @@
 ﻿{
-    "version":  "1.0.0",
-    "generated":  "2026-06-13 17:09",
+    "version":  "1.0.1",
+    "generated":  "2026-06-14 20:31",
     "signer":  "CN=Tomer Wasserman, O=Tomer Wasserman, L=Haifa, S=Haifa, C=IL",
     "files":  [
                   {
                       "name":  "ClaudePortal-FreeAgent.ps1",
-                      "sha256":  "015adb6d0daa3fb2811835fadd5c8c926ce141f22f50658238af45596c218b29"
+                      "sha256":  "cf826d52ed94cc1d59956600500fa3b9a4689ad8e6d0f7a5d3d4d9fc8fb84adb"
                   },
                   {
                       "name":  "ClaudePortal.html",
-                      "sha256":  "20440574779ea168bfa90d807f060a3cbda0ec18b51864282fa92e41d95e5cfc"
+                      "sha256":  "bb8cc4311cb5509269b06b293ed146251d0fa397011a59e059e01f6df1c02017"
                   }
               ]
 }

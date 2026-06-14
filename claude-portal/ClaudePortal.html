@@ -11,7 +11,8 @@
   :root {
     --bg:#1f1e1b; --panel:#2a2723; --panel2:#322e29; --line:#403b34;
     --txt:#ece7df; --muted:#9a9389; --accent:#d97757; --user:#3a4a5a; --green:#7fb069;
-    --user-color:#ece7df; --claude-color:#ece7df;
+    --user-bubble-bg:#d97757; --user-bubble-text:#ffffff;
+    --claude-bubble-bg:#2a2723; --claude-bubble-text:#ece7df;
     --font:"Segoe UI","Assistant",Arial,sans-serif; --fontsize:15px; --bg-image:none;
   }
   * { box-sizing:border-box; }
@@ -35,6 +36,8 @@
   .conv-item:hover { background:var(--panel2); }
   .conv-item.active { background:var(--panel2); border-color:var(--accent); }
   .conv-item .ci-dot { color:var(--green); margin-inline-end:4px; }
+  .conv-item .ci-pin { margin-inline-end:4px; font-size:11px; }
+  .conv-section-h { font-size:10px; font-weight:700; letter-spacing:.4px; color:var(--muted); text-transform:uppercase; padding:6px 10px 2px; margin-top:4px; }
   .side-foot { border-top:1px solid var(--line); padding-top:8px; display:flex; flex-direction:column; gap:6px; }
   .model-disp { font-size:12px; color:var(--muted); padding:2px 4px; }
   .model-disp b { color:var(--accent); }
@@ -86,10 +89,11 @@
   .ready.idle .rdot { background:var(--green); box-shadow:0 0 6px var(--green); }
   .ready.busy { color:var(--accent); }
   #log { flex:1; overflow-y:auto; padding:20px 16px 60px; }
-  .wrap { max-width:860px; margin:0 auto; }
-  .msg { margin:10px 0; padding:12px 15px; border-radius:12px; line-height:1.7; font-size:var(--fontsize); word-wrap:break-word; }
-  .msg.user { background:var(--user); border:1px solid #46596b; color:var(--user-color); }
-  .msg.assistant { background:var(--panel); border:1px solid var(--line); color:var(--claude-color); }
+  .wrap { max-width:860px; margin:0 auto; display:flex; flex-direction:column; }
+  .msg { max-width:80%; margin:7px 0; padding:9px 14px; border-radius:18px; line-height:1.65; font-size:var(--fontsize); word-wrap:break-word; box-shadow:0 1px 3px rgba(0,0,0,.20); }
+  .msg.user { align-self:flex-start; background:var(--user-bubble-bg); color:var(--user-bubble-text); border:none; border-bottom-right-radius:6px; }
+  .msg.assistant { align-self:flex-end; background:var(--claude-bubble-bg); color:var(--claude-bubble-text); border:1px solid var(--line); border-bottom-left-radius:6px; }
+  .msg.user .role { color:rgba(255,255,255,.72); } .msg.user a { color:#fff; text-decoration:underline; }
   .body { display:flex; flex-direction:column; gap:8px; }
   .seg { unicode-bidi:isolate; }
   .seg p, .seg li, .seg blockquote, .seg .md-h { unicode-bidi:isolate; }
@@ -106,6 +110,11 @@
   .att-row { display:flex; flex-wrap:wrap; gap:8px; }
   .att-file { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--txt); background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:6px 10px; align-self:flex-start; }
   .role { font-size:11px; color:var(--muted); margin-bottom:6px; font-weight:600; letter-spacing:.3px; }
+  .filecard, .widgetcard { background:var(--panel2); border:1px solid var(--accent); border-radius:10px; padding:9px 12px; margin:3px 0; font-size:13px; }
+  .fc-h { color:var(--accent); font-weight:600; margin-bottom:6px; }
+  .fc-item { display:block; background:var(--panel); border:1px solid var(--line); border-radius:7px; padding:5px 9px; margin:3px 0; color:var(--txt); unicode-bidi:plaintext; word-break:break-all; }
+  .fc-note { font-size:11px; color:var(--muted); margin-top:5px; }
+  .widgetcard b { color:var(--txt); }
   pre { background:#15140f; border:1px solid var(--line); border-radius:8px; padding:10px 12px; overflow-x:auto; direction:ltr; text-align:left; }
   .codewrap { border:1px solid var(--line); border-radius:8px; overflow:hidden; direction:ltr; margin:2px 0; }
   .codebar { display:flex; justify-content:space-between; align-items:center; background:#15140f; border-bottom:1px solid var(--line); padding:3px 6px 3px 10px; }
@@ -297,10 +306,14 @@
     </div>
 
     <div class="set-section">
-      <div class="set-label">צבעי טקסט</div>
+      <div class="set-label">צבעי בועות</div>
       <div class="set-row">
-        <label class="mini">הטקסט שלך <input type="color" id="setUserColor"></label>
-        <label class="mini">תשובות Claude <input type="color" id="setClaudeColor"></label>
+        <label class="mini">בועה שלך — רקע <input type="color" id="setUserBubbleBg"></label>
+        <label class="mini">טקסט <input type="color" id="setUserBubbleText"></label>
+      </div>
+      <div class="set-row" style="margin-top:8px">
+        <label class="mini">בועת Claude — רקע <input type="color" id="setClaudeBubbleBg"></label>
+        <label class="mini">טקסט <input type="color" id="setClaudeBubbleText"></label>
       </div>
     </div>
 
@@ -505,12 +518,14 @@ function renderConvList(list){
   const cl = document.getElementById('convList');
   if (!cl) return;
   cl.innerHTML = '';
-  for (const s of list){
+  const mkItem = (s, isPinned)=>{
     const d = document.createElement('div');
     d.className = 'conv-item' + (s.id===curId ? ' active' : '');
     d.dir = 'auto';
     d.title = s.title;
-    d.innerHTML = (s.active ? '<span class="ci-dot">●</span>' : '') + esc(s.title);
+    d.innerHTML = (s.active ? '<span class="ci-dot">●</span>' : '')
+                + (isPinned ? '<span class="ci-pin">📌</span>' : '')
+                + esc(s.title);
     d.onclick = ()=>{
       followActive = false;                                   // browsing a specific conversation
       const fe = document.getElementById('followActive'); if (fe) fe.checked = false;
@@ -518,7 +533,17 @@ function renderConvList(list){
       sel.value = s.id; switchSession(s.id); renderConvList(list);
     };
     cl.appendChild(d);
+  };
+  const pinned = list.filter(s=>s.pinned);
+  const rest   = list.filter(s=>!s.pinned);
+  if (pinned.length){
+    const h = document.createElement('div'); h.className='conv-section-h'; h.textContent='📌 מסומנות';
+    cl.appendChild(h);
+    for (const s of pinned) mkItem(s, true);
+    const h2 = document.createElement('div'); h2.className='conv-section-h'; h2.textContent='שיחות';
+    cl.appendChild(h2);
   }
+  for (const s of rest) mkItem(s, false);
 }
 
 function blockText(content){
@@ -606,8 +631,21 @@ function renderAssistant(o){
         if (b.input.status === 'deleted'){ tasks.delete(tid); renderTasksBar(); }
         else if (t && b.input.status){ t.status = b.input.status; renderTasksBar(); }
       }
-      const lbl = toolLabel(b);
-      items.push({ sig:'u|'+lbl, html:'<div class="seg tooluse" dir="auto">⚙ ' + esc(lbl) + '</div>' });
+      const nm = (b.name || '');
+      if (/present_files/i.test(nm) && b.input && b.input.files && b.input.files.length){
+        // file / "Save skill" cards that Cowork shows after creating files
+        let fh = '<div class="filecard" dir="rtl"><div class="fc-h">📄 קבצים שנוצרו</div>';
+        for (const f of b.input.files){ const p=(f.file_path||f.path||''); const name=(String(p).split(/[\\/]/).pop())||p; fh += '<div class="fc-item" title="'+esc(String(p)).replace(/"/g,'&quot;')+'">'+esc(String(name))+'</div>'; }
+        fh += '<div class="fc-note">לפתיחה / שמירה — ראה את הכרטיס ב-Cowork</div></div>';
+        items.push({ sig:'pf|'+JSON.stringify(b.input.files).slice(0,160), html:fh });
+      } else if (/show_widget|create_artifact|artifact/i.test(nm)){
+        // interactive widget / visualization / live artifact placeholder
+        const t = (b.input && (b.input.title || b.input.name)) || 'תצוגה אינטראקטיבית';
+        items.push({ sig:'w|'+esc(String(t)), html:'<div class="widgetcard" dir="rtl">🧩 תצוגה אינטראקטיבית: <b>'+esc(String(t))+'</b><div class="fc-note">פתח ב-Cowork לצפייה מלאה</div></div>' });
+      } else {
+        const lbl = toolLabel(b);
+        items.push({ sig:'u|'+lbl, html:'<div class="seg tooluse" dir="auto">⚙ ' + esc(lbl) + '</div>' });
+      }
     }
   }
   if (!items.length) return;
@@ -937,15 +975,18 @@ function saveTheme(){ try { localStorage.setItem('cp_theme', JSON.stringify(them
 function applyTheme(){
   if (theme.font) root.style.setProperty('--font', theme.font);
   if (theme.fontsize) root.style.setProperty('--fontsize', theme.fontsize+'px');
-  if (theme.userColor) root.style.setProperty('--user-color', theme.userColor);
-  if (theme.claudeColor) root.style.setProperty('--claude-color', theme.claudeColor);
+  if (theme.userBubbleBg) root.style.setProperty('--user-bubble-bg', theme.userBubbleBg);
+  if (theme.userBubbleText) root.style.setProperty('--user-bubble-text', theme.userBubbleText);
+  if (theme.claudeBubbleBg) root.style.setProperty('--claude-bubble-bg', theme.claudeBubbleBg);
+  if (theme.claudeBubbleText) root.style.setProperty('--claude-bubble-text', theme.claudeBubbleText);
   if (theme.bg) root.style.setProperty('--bg', theme.bg);
   if (theme.bgImage) root.style.setProperty('--bg-image', theme.bgImage);
 }
 let theme = loadTheme(); applyTheme();
 
 const setFontSize=document.getElementById('setFontSize'), fsVal=document.getElementById('fsVal'),
-      setUserColor=document.getElementById('setUserColor'), setClaudeColor=document.getElementById('setClaudeColor'),
+      setUserBubbleBg=document.getElementById('setUserBubbleBg'), setUserBubbleText=document.getElementById('setUserBubbleText'),
+      setClaudeBubbleBg=document.getElementById('setClaudeBubbleBg'), setClaudeBubbleText=document.getElementById('setClaudeBubbleText'),
       setBg=document.getElementById('setBg');
 
 // font options (Hebrew + English). Google fonts loaded via <link>; system fallbacks too.
@@ -997,8 +1038,10 @@ function buildSwatches(){
 function openSettings(){
   setFontSize.value = parseInt(theme.fontsize || 15);
   fsVal.textContent = setFontSize.value + 'px';
-  setUserColor.value = theme.userColor || '#ece7df';
-  setClaudeColor.value = theme.claudeColor || '#ece7df';
+  setUserBubbleBg.value = theme.userBubbleBg || '#d97757';
+  setUserBubbleText.value = theme.userBubbleText || '#ffffff';
+  setClaudeBubbleBg.value = theme.claudeBubbleBg || '#2a2723';
+  setClaudeBubbleText.value = theme.claudeBubbleText || '#ece7df';
   setBg.value = theme.bg || '#1f1e1b';
   buildFontGrid(); buildSwatches();
   settingsEl.style.display = 'flex';
@@ -1018,8 +1061,10 @@ document.getElementById('settingsClose').addEventListener('click', ()=>settingsE
 settingsEl.addEventListener('click', e=>{ if (e.target===settingsEl) settingsEl.style.display='none'; });
 
 setFontSize.addEventListener('input', ()=>{ theme.fontsize=setFontSize.value; fsVal.textContent=setFontSize.value+'px'; applyTheme(); saveTheme(); });
-setUserColor.addEventListener('input', ()=>{ theme.userColor=setUserColor.value; applyTheme(); saveTheme(); });
-setClaudeColor.addEventListener('input', ()=>{ theme.claudeColor=setClaudeColor.value; applyTheme(); saveTheme(); });
+setUserBubbleBg.addEventListener('input', ()=>{ theme.userBubbleBg=setUserBubbleBg.value; applyTheme(); saveTheme(); });
+setUserBubbleText.addEventListener('input', ()=>{ theme.userBubbleText=setUserBubbleText.value; applyTheme(); saveTheme(); });
+setClaudeBubbleBg.addEventListener('input', ()=>{ theme.claudeBubbleBg=setClaudeBubbleBg.value; applyTheme(); saveTheme(); });
+setClaudeBubbleText.addEventListener('input', ()=>{ theme.claudeBubbleText=setClaudeBubbleText.value; applyTheme(); saveTheme(); });
 setBg.addEventListener('input', ()=>{ theme.bg=setBg.value; theme.bgImage='none'; applyTheme(); saveTheme(); buildSwatches(); });
 
 document.getElementById('setBgImgBtn').addEventListener('click', ()=>document.getElementById('setBgImgInput').click());
@@ -1031,7 +1076,7 @@ document.getElementById('setBgImgClear').addEventListener('click', ()=>{ theme.b
 
 document.getElementById('setReset').addEventListener('click', ()=>{
   theme={}; saveTheme();
-  ['--font','--fontsize','--user-color','--claude-color','--bg','--bg-image'].forEach(v=>root.style.removeProperty(v));
+  ['--font','--fontsize','--user-bubble-bg','--user-bubble-text','--claude-bubble-bg','--claude-bubble-text','--bg','--bg-image'].forEach(v=>root.style.removeProperty(v));
   openSettings();
 });
 
